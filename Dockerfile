@@ -10,7 +10,6 @@ RUN apt-get update && apt-get install -y \
     libatk1.0-0 \
     libc6 \
     libcairo2 \
-    libcups2 \
     libdbus-1-3 \
     libexpat1 \
     libfontconfig1 \
@@ -59,37 +58,3 @@ EXPOSE 3000
 
 # Démarrer l'application
 CMD ["npm", "start"]
-```
-
-4. **Commit new file**
-
----
-
-### **Railway détectera automatiquement le Dockerfile**
-
-Railway va :
-1. Voir le Dockerfile
-2. L'utiliser au lieu de Nixpacks
-3. Installer TOUTES les dépendances
-4. Démarrer le bot
-
----
-
-## ⏳ Temps d'attente
-
-- Upload : 30 sec
-- Railway rebuild : **5-7 minutes** (plus long car Docker)
-
----
-
-## 🎯 Ce que tu devrais voir après
-```
-Building...
-[+] Building 350.5s
-Successfully built
-Starting...
-✅ Firebase Admin initialisé
-🚀 Démarrage du bot WhatsApp Planning...
-📱 QR Code généré !
-🌐 URL du QR code :
-https://api.qrserver.com/v1/...
