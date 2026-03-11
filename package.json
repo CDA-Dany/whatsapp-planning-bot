@@ -1,0 +1,22 @@
+{
+  "name": "whatsapp-planning-bot",
+  "version": "1.0.0",
+  "description": "Bot WhatsApp pour gérer le planning du chantier avec Claude AI",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js",
+    "test": "node test.js"
+  },
+  "keywords": ["whatsapp", "bot", "claude", "planning"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "whatsapp-web.js": "^1.23.0",
+    "qrcode-terminal": "^0.12.0",
+    "@anthropic-ai/sdk": "^0.20.0",
+    "firebase-admin": "^12.0.0",
+    "dotenv": "^16.4.5"
+  }
+}
