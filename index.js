@@ -2,7 +2,7 @@ import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import dotenv from 'dotenv';
 import { analyzerMessage } from './claude.js';
-import { sauvegarderTachePlanning, rechercherTaches, supprimerTaches, modifierTaches, detecterConflits, validerTache } from './firestore.js';
+import { sauvegarderTachePlanning, rechercherTaches, supprimerTaches, modifierTaches, detecterConflits, validerTache, detecterConflitPlageHoraire } from './firestore.js';
 
 dotenv.config();
 
@@ -36,6 +36,9 @@ const tachesEnAttente = new Map();
 
 // Stockage temporaire pour les modifications en attente de clarification
 const modificationsEnAttente = new Map();
+
+// Stockage temporaire pour les plages horaires en attente de décision
+const plagesEnAttente = new Map();
 
 // ========================
 // ÉVÉNEMENTS WHATSAPP
@@ -226,6 +229,76 @@ async function traiterMessage(message, texte, senderName, chat) {
             }
         }
         
+        // PRIORITÉ 0 : Vérifier si c'est une réponse à un conflit de plage horaire
+        const plageEnAttente = plagesEnAttente.get(conversationId);
+        if (plageEnAttente) {
+            const reponse = texte.trim();
+            
+            if (reponse === '1') {
+                // Option 1 : Supprimer la tâche existante
+                await supprimerTaches([plageEnAttente.tacheExistante.id]);
+                
+                // Ajouter la nouvelle tâche (heure_fin reste null → jusqu'à 16h)
+                await sauvegarderTachePlanning(plageEnAttente.nouvelleTache);
+                
+                const dateFormatee = new Date(plageEnAttente.nouvelleTache.date).toLocaleDateString('fr-FR', {
+                    weekday: 'long',
+                    day: 'numeric',
+                    month: 'long'
+                });
+                
+                let message = `✅ *Planning mis à jour !*\n\n`;
+                message += `❌ Tâche supprimée : ${plageEnAttente.tacheExistante.activite} (${plageEnAttente.tacheExistante.heure})\n\n`;
+                message += `✅ Tâche ajoutée :\n`;
+                message += `📅 ${dateFormatee}\n`;
+                message += `🕐 ${plageEnAttente.nouvelleTache.heure} - 16h\n`;
+                message += `📋 ${plageEnAttente.nouvelleTache.activite}\n`;
+                message += `👤 ${plageEnAttente.personne}\n`;
+                if (plageEnAttente.nouvelleTache.lieu) message += `📍 ${plageEnAttente.nouvelleTache.lieu}\n`;
+                
+                await chat.sendMessage(message);
+                
+                // Nettoyer
+                plagesEnAttente.delete(conversationId);
+                conversationsEnCours.delete(conversationId);
+                return;
+            }
+            
+            if (reponse === '2') {
+                // Option 2 : Terminer la nouvelle tâche à l'heure de la tâche existante
+                plageEnAttente.nouvelleTache.heure_fin = plageEnAttente.heureConflictuelle;
+                
+                // Ajouter la nouvelle tâche avec heure de fin définie
+                await sauvegarderTachePlanning(plageEnAttente.nouvelleTache);
+                
+                const dateFormatee = new Date(plageEnAttente.nouvelleTache.date).toLocaleDateString('fr-FR', {
+                    weekday: 'long',
+                    day: 'numeric',
+                    month: 'long'
+                });
+                
+                let message = `✅ *Planning mis à jour !*\n\n`;
+                message += `✅ Tâche ajoutée :\n`;
+                message += `📅 ${dateFormatee}\n`;
+                message += `🕐 ${plageEnAttente.nouvelleTache.heure} - ${plageEnAttente.heureConflictuelle}\n`;
+                message += `📋 ${plageEnAttente.nouvelleTache.activite}\n`;
+                message += `👤 ${plageEnAttente.personne}\n`;
+                if (plageEnAttente.nouvelleTache.lieu) message += `📍 ${plageEnAttente.nouvelleTache.lieu}\n`;
+                message += `\n✅ Tâche conservée : ${plageEnAttente.tacheExistante.activite} (${plageEnAttente.tacheExistante.heure})\n`;
+                
+                await chat.sendMessage(message);
+                
+                // Nettoyer
+                plagesEnAttente.delete(conversationId);
+                conversationsEnCours.delete(conversationId);
+                return;
+            }
+            
+            // Réponse pas claire
+            await chat.sendMessage('❓ Répondez par *1* pour supprimer ou *2* pour ajuster l\'heure de fin.');
+            return;
+        }
+        
         // PRIORITÉ 1 : Vérifier si c'est une réponse à une confirmation de conflit
         const tacheEnAttente = tachesEnAttente.get(conversationId);
         if (tacheEnAttente) {
@@ -335,6 +408,7 @@ async function ajouterAuPlanning(tache, chat) {
         const tacheComplete = {
             date: tache.date || new Date().toISOString().split('T')[0],
             heure: tache.heure || null,
+            heure_fin: tache.heure_fin || null,
             activite: tache.activite || 'Tâche sans description',
             personnes: tache.personnes || [],
             lieu: tache.lieu || null,
@@ -349,7 +423,46 @@ async function ajouterAuPlanning(tache, chat) {
             return;
         }
         
-        // VÉRIFIER LES CONFLITS
+        // DÉTECTER CONFLIT DE PLAGE HORAIRE (heure sans heure_fin qui irait jusqu'à 16h)
+        const conflitPlage = await detecterConflitPlageHoraire(tacheComplete);
+        
+        if (conflitPlage && conflitPlage.length > 0) {
+            // Demander à l'utilisateur ce qu'il veut faire
+            const conflit = conflitPlage[0];
+            const tacheExistante = conflit.tacheExistante;
+            
+            const dateFormatee = new Date(tacheComplete.date).toLocaleDateString('fr-FR', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long'
+            });
+            
+            let message = `⚠️ *Conflit de plage horaire détecté !*\n\n`;
+            message += `${conflit.personne} a déjà une tâche à ${tacheExistante.heure} :\n`;
+            message += `📋 ${tacheExistante.activite}\n`;
+            if (tacheExistante.lieu) message += `📍 ${tacheExistante.lieu}\n`;
+            message += `\nLa nouvelle tâche "${tacheComplete.activite}" commencerait à ${tacheComplete.heure}.\n\n`;
+            message += `❓ *Que veux-tu faire ?*\n`;
+            message += `1️⃣ Supprimer la tâche de ${tacheExistante.heure}\n`;
+            message += `2️⃣ Terminer "${tacheComplete.activite}" à ${tacheExistante.heure}\n\n`;
+            message += `Répondez *1* ou *2*`;
+            
+            await chat.sendMessage(message);
+            
+            // Stocker pour la réponse
+            const conversationId = chat.id._serialized;
+            plagesEnAttente.set(conversationId, {
+                nouvelleTache: tacheComplete,
+                tacheExistante: tacheExistante,
+                personne: conflit.personne,
+                heureConflictuelle: conflit.heureConflituelle
+            });
+            
+            console.log('⚠️ Conflit de plage horaire, attente de décision');
+            return;
+        }
+        
+        // VÉRIFIER LES CONFLITS NORMAUX
         const conflits = await detecterConflits(tacheComplete);
         
         if (conflits.length > 0) {
@@ -454,7 +567,13 @@ async function ajouterAuPlanningSansVerification(tacheComplete, chat) {
         
         let confirmation = `✅ *Tâche ajoutée au planning !*\n\n`;
         confirmation += `📅 ${dateFormatee}\n`;
-        if (tacheComplete.heure) confirmation += `🕐 ${tacheComplete.heure}\n`;
+        if (tacheComplete.heure) {
+            if (tacheComplete.heure_fin) {
+                confirmation += `🕐 ${tacheComplete.heure} - ${tacheComplete.heure_fin}\n`;
+            } else {
+                confirmation += `🕐 ${tacheComplete.heure} - 16h\n`;
+            }
+        }
         confirmation += `📋 ${tacheComplete.activite}\n`;
         if (tacheComplete.personnes && tacheComplete.personnes.length > 0) {
             confirmation += `👤 ${tacheComplete.personnes.join(', ')}\n`;
@@ -482,6 +601,7 @@ async function ajouterPlusieursTaches(taches, chat) {
         const tachesCompletes = taches.map(tache => ({
             date: tache.date || new Date().toISOString().split('T')[0],
             heure: tache.heure || null,
+            heure_fin: tache.heure_fin || null,
             activite: tache.activite || 'Tâche sans description',
             personnes: tache.personnes || [],
             lieu: tache.lieu || null,
@@ -498,7 +618,23 @@ async function ajouterPlusieursTaches(taches, chat) {
             }
         }
         
-        // Vérifier les conflits pour toutes les tâches
+        // Détecter les conflits de plage horaire pour chaque tâche
+        for (const tache of tachesCompletes) {
+            const conflitPlage = await detecterConflitPlageHoraire(tache);
+            if (conflitPlage && conflitPlage.length > 0) {
+                // Pour les tâches multiples avec conflit de plage, on simplifie :
+                // On demande juste une confirmation globale
+                const conflit = conflitPlage[0];
+                
+                let message = `⚠️ *Conflit de plage horaire !*\n\n`;
+                message += `${conflit.personne} a déjà une tâche à ${conflit.tacheExistante.heure}.\n`;
+                message += `La nouvelle tâche "${tache.activite}" commencerait à ${tache.heure}.\n\n`;
+                message += `Pour gérer des plages horaires complexes, ajoutez les tâches une par une.\n`;
+                return;
+            }
+        }
+        
+        // Vérifier les conflits normaux pour toutes les tâches
         const tousLesConflits = [];
         for (const tache of tachesCompletes) {
             const conflits = await detecterConflits(tache);
