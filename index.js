@@ -3,7 +3,7 @@ const { Client, LocalAuth } = pkg;
 import qrcode from 'qrcode-terminal';
 import dotenv from 'dotenv';
 import { analyzerMessage } from './claude.js';
-import { sauvegarderTachePlanning } from './firestore.js';
+import { sauvegarderTachePlanning, rechercherTaches, supprimerTaches, modifierTaches } from './firestore.js';
 
 dotenv.config();
 
@@ -73,12 +73,14 @@ client.on('message', async (message) => {
         const chat = await message.getChat();
         
         // DEBUG: Afficher TOUS les messages reçus
-        console.log('\n📨 Message reçu:');
-        console.log('  Type:', chat.isGroup ? 'Groupe' : 'Privé');
-        console.log('  Nom du chat:', chat.name);
-        console.log('  ID du chat:', chat.id._serialized);
-        console.log('  Contenu:', message.body);
-        console.log('  De moi?', message.fromMe);
+        if (DEBUG) {
+            console.log('\n📨 Message reçu:');
+            console.log('  Type:', chat.isGroup ? 'Groupe' : 'Privé');
+            console.log('  Nom du chat:', chat.name);
+            console.log('  ID du chat:', chat.id._serialized);
+            console.log('  Contenu:', message.body);
+            console.log('  De moi?', message.fromMe);
+        }
         
         // Vérifier si c'est le bon groupe
         const isTargetGroup = chat.isGroup && (
@@ -86,22 +88,18 @@ client.on('message', async (message) => {
             (GROUP_ID && chat.id._serialized === GROUP_ID)
         );
         
-        console.log('  Groupe cible configuré:', GROUP_NAME);
-        console.log('  Est le groupe cible?', isTargetGroup);
-        console.log('---');
+        if (DEBUG) {
+            console.log('  Groupe cible configuré:', GROUP_NAME);
+            console.log('  Est le groupe cible?', isTargetGroup);
+            console.log('---');
+        }
         
         if (!isTargetGroup) {
-            if (DEBUG) {
-                console.log('⚠️ Message ignoré - Pas le groupe cible');
-            }
             return; // Ignorer les autres conversations
         }
         
         // Ignorer les messages du bot lui-même
         if (message.fromMe) {
-            if (DEBUG) {
-                console.log('⚠️ Message ignoré - Envoyé par le bot');
-            }
             return;
         }
         
@@ -147,13 +145,21 @@ async function traiterMessage(message, texte, senderName, chat) {
         switch (analyse.action) {
             case 'ajouter_planning':
                 await ajouterAuPlanning(analyse.tache, chat);
-                // Effacer le contexte de conversation
+                conversationsEnCours.delete(conversationId);
+                break;
+                
+            case 'supprimer_planning':
+                await supprimerDuPlanning(analyse.criteres, analyse.confirmation, chat);
+                conversationsEnCours.delete(conversationId);
+                break;
+                
+            case 'modifier_planning':
+                await modifierLePlanning(analyse.criteres, analyse.modifications, analyse.confirmation, chat);
                 conversationsEnCours.delete(conversationId);
                 break;
                 
             case 'demander_precision':
                 await demanderPrecision(analyse.question, chat);
-                // Sauvegarder le contexte
                 conversationContext.push({ role: 'user', content: texte });
                 conversationContext.push({ role: 'assistant', content: analyse.question });
                 conversationsEnCours.set(conversationId, conversationContext);
@@ -163,7 +169,6 @@ async function traiterMessage(message, texte, senderName, chat) {
                 if (DEBUG) {
                     console.log('ℹ️ Message ignoré (pas lié au planning)');
                 }
-                // Effacer le contexte si pas lié au planning
                 conversationsEnCours.delete(conversationId);
                 break;
                 
@@ -205,6 +210,86 @@ async function ajouterAuPlanning(tache, chat) {
     } catch (error) {
         console.error('❌ Erreur ajout planning:', error);
         await chat.sendMessage('❌ Erreur lors de l\'ajout au planning. Réessayez plus tard.');
+    }
+}
+
+async function supprimerDuPlanning(criteres, confirmation, chat) {
+    try {
+        // Rechercher les tâches correspondantes
+        const taches = await rechercherTaches(criteres);
+        
+        if (taches.length === 0) {
+            await chat.sendMessage('❌ Aucune tâche trouvée correspondant à ces critères.');
+            return;
+        }
+        
+        // Supprimer les tâches
+        const ids = taches.map(t => t.id);
+        await supprimerTaches(ids);
+        
+        // Confirmation dans WhatsApp
+        let message = `✅ *${taches.length} tâche(s) supprimée(s) !*\n\n`;
+        
+        taches.forEach(t => {
+            const dateFormatee = new Date(t.date).toLocaleDateString('fr-FR', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long'
+            });
+            message += `📅 ${dateFormatee}`;
+            if (t.heure) message += ` à ${t.heure}`;
+            message += `\n📋 ${t.activite}\n\n`;
+        });
+        
+        await chat.sendMessage(message);
+        console.log('✅ Tâche(s) supprimée(s) avec succès');
+        
+    } catch (error) {
+        console.error('❌ Erreur suppression planning:', error);
+        await chat.sendMessage('❌ Erreur lors de la suppression. Réessayez plus tard.');
+    }
+}
+
+async function modifierLePlanning(criteres, modifications, confirmation, chat) {
+    try {
+        // Rechercher les tâches correspondantes
+        const taches = await rechercherTaches(criteres);
+        
+        if (taches.length === 0) {
+            await chat.sendMessage('❌ Aucune tâche trouvée correspondant à ces critères.');
+            return;
+        }
+        
+        // Modifier les tâches
+        const ids = taches.map(t => t.id);
+        await modifierTaches(ids, modifications);
+        
+        // Confirmation dans WhatsApp
+        let message = `✅ *${taches.length} tâche(s) modifiée(s) !*\n\n`;
+        
+        taches.forEach(t => {
+            const dateFormatee = new Date(modifications.date || t.date).toLocaleDateString('fr-FR', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long'
+            });
+            message += `📅 ${dateFormatee}`;
+            if (modifications.heure || t.heure) {
+                message += ` à ${modifications.heure || t.heure}`;
+            }
+            message += `\n📋 ${modifications.activite || t.activite}\n`;
+            if (modifications.personnes || t.personnes) {
+                message += `👤 ${(modifications.personnes || t.personnes).join(', ')}\n`;
+            }
+            message += '\n';
+        });
+        
+        await chat.sendMessage(message);
+        console.log('✅ Tâche(s) modifiée(s) avec succès');
+        
+    } catch (error) {
+        console.error('❌ Erreur modification planning:', error);
+        await chat.sendMessage('❌ Erreur lors de la modification. Réessayez plus tard.');
     }
 }
 
