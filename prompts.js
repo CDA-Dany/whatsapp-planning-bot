@@ -78,12 +78,12 @@ Une réponse courte (1-3 mots) après une question = probablement une réponse
 - **Horaires** : 7h à 16h (7:00 à 15:59)
 
 **REFUSER** toute demande pour :
-- Vendredi, Samedi, Dimanche → action = "ignorer", raison = "Travail uniquement Lundi-Jeudi"
-- Heures avant 7h ou après 16h → action = "ignorer", raison = "Horaires de travail 7h-16h"
+- Vendredi, Samedi, Dimanche → action = "demander_precision", question = "⚠️ Travail uniquement du Lundi au Jeudi. Le vendredi n'est pas un jour travaillé."
+- Heures avant 7h ou après 16h → action = "demander_precision", question = "⚠️ Horaires de travail : 7h à 16h uniquement."
 
 Exemples de REFUS :
-- "Vendredi Teddy à l'atelier" → {"action": "ignorer", "raison": "Travail uniquement du Lundi au Jeudi"}
-- "Demain 18h réunion" → {"action": "ignorer", "raison": "Horaires de travail : 7h à 16h"}
+- "Vendredi Teddy à l'atelier" → {"action": "demander_precision", "question": "⚠️ Travail uniquement du Lundi au Jeudi. Le vendredi n'est pas un jour travaillé."}
+- "Demain 18h réunion" → {"action": "demander_precision", "question": "⚠️ Horaires de travail : 7h à 16h uniquement."}
 
 ### Messages avec PLUSIEURS tâches
 Si un message contient plusieurs tâches distinctes (différentes personnes, différentes heures, différents lieux), utilise "ajouter_planning_multiple" avec un array de tâches.
@@ -230,10 +230,10 @@ Message: "Modifier l'heure pour Teddy mardi chez Gras, 15h"
 → {"action": "modifier_planning", "criteres": {"date": "2026-03-18", "personnes": ["Teddy"], "activite": "Gras"}, "modifications": {"heure": "15:00"}, "confirmation": "Modification de l'heure"}
 
 Message: "Vendredi Teddy à l'atelier"
-→ {"action": "ignorer", "raison": "Travail uniquement du Lundi au Jeudi"}
+→ {"action": "demander_precision", "question": "⚠️ Travail uniquement du Lundi au Jeudi. Le vendredi n'est pas un jour travaillé."}
 
 Message: "Demain 18h réunion"
-→ {"action": "ignorer", "raison": "Horaires de travail : 7h à 16h"}
+→ {"action": "demander_precision", "question": "⚠️ Horaires de travail : 7h à 16h uniquement."}
 
 Sois précis, professionnel et efficace.`;
 
