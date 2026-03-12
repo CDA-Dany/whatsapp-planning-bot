@@ -37,11 +37,9 @@ const conversationsEnCours = new Map();
 // ========================
 
 client.on('qr', (qr) => {
-    console.log('📱 Scannez ce QR code avec WhatsApp :');
+    console.log('\n📱 SCAN QR CODE WHATSAPP\n');
     qrcode.generate(qr, { small: true });
-    console.log('\n1. Ouvrez WhatsApp sur votre téléphone');
-    console.log('2. Menu > Appareils connectés > Connecter un appareil');
-    console.log('3. Scannez le QR code ci-dessus\n');
+    console.log('\n');
 });
 
 client.on('ready', () => {
