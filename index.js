@@ -2,7 +2,7 @@ import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import dotenv from 'dotenv';
 import { analyzerMessage } from './claude.js';
-import { sauvegarderTachePlanning, rechercherTaches, supprimerTaches, modifierTaches, detecterConflits } from './firestore.js';
+import { sauvegarderTachePlanning, rechercherTaches, supprimerTaches, modifierTaches, detecterConflits, validerTache } from './firestore.js';
 
 dotenv.config();
 
@@ -342,6 +342,13 @@ async function ajouterAuPlanning(tache, chat) {
             notes: tache.notes || null
         };
         
+        // VALIDER LA TÂCHE (Lundi-Jeudi, 7h-16h)
+        const validation = validerTache(tacheComplete);
+        if (!validation.valide) {
+            await chat.sendMessage(validation.erreurs.join('\n'));
+            return;
+        }
+        
         // VÉRIFIER LES CONFLITS
         const conflits = await detecterConflits(tacheComplete);
         
@@ -481,6 +488,15 @@ async function ajouterPlusieursTaches(taches, chat) {
             status: tache.status || 'planifie',
             notes: tache.notes || null
         }));
+        
+        // VALIDER TOUTES LES TÂCHES
+        for (const tache of tachesCompletes) {
+            const validation = validerTache(tache);
+            if (!validation.valide) {
+                await chat.sendMessage(validation.erreurs.join('\n'));
+                return;
+            }
+        }
         
         // Vérifier les conflits pour toutes les tâches
         const tousLesConflits = [];
@@ -670,6 +686,21 @@ async function supprimerDuPlanning(criteres, confirmation, chat) {
 
 async function modifierLePlanning(criteres, modifications, confirmation, chat) {
     try {
+        // VALIDER LES MODIFICATIONS (si date ou heure sont modifiées)
+        if (modifications.date || modifications.heure) {
+            // Créer une tâche temporaire pour validation
+            const tacheTemp = {
+                date: modifications.date || new Date().toISOString().split('T')[0],
+                heure: modifications.heure || null
+            };
+            
+            const validation = validerTache(tacheTemp);
+            if (!validation.valide) {
+                await chat.sendMessage(validation.erreurs.join('\n'));
+                return;
+            }
+        }
+        
         // Rechercher les tâches correspondantes
         const taches = await rechercherTaches(criteres);
         
