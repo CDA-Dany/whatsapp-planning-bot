@@ -146,6 +146,11 @@ async function traiterMessage(message, texte, senderName, chat) {
                 conversationsEnCours.delete(conversationId);
                 break;
                 
+            case 'ajouter_planning_multiple':
+                await ajouterPlusieursTaches(analyse.taches, chat);
+                conversationsEnCours.delete(conversationId);
+                break;
+                
             case 'supprimer_planning':
                 await supprimerDuPlanning(analyse.criteres, analyse.confirmation, chat);
                 conversationsEnCours.delete(conversationId);
@@ -182,11 +187,22 @@ async function traiterMessage(message, texte, senderName, chat) {
 
 async function ajouterAuPlanning(tache, chat) {
     try {
+        // Ajouter valeurs par défaut si manquantes (pour éviter crash)
+        const tacheComplete = {
+            date: tache.date || new Date().toISOString().split('T')[0], // Par défaut : aujourd'hui
+            heure: tache.heure || null,
+            activite: tache.activite || 'Tâche sans description',
+            personnes: tache.personnes || [],
+            lieu: tache.lieu || null,
+            status: tache.status || 'planifie',
+            notes: tache.notes || null
+        };
+        
         // Sauvegarder dans Firestore
-        await sauvegarderTachePlanning(tache);
+        await sauvegarderTachePlanning(tacheComplete);
         
         // Confirmer dans WhatsApp
-        const dateFormatee = new Date(tache.date).toLocaleDateString('fr-FR', {
+        const dateFormatee = new Date(tacheComplete.date).toLocaleDateString('fr-FR', {
             weekday: 'long',
             day: 'numeric',
             month: 'long'
@@ -194,12 +210,12 @@ async function ajouterAuPlanning(tache, chat) {
         
         let confirmation = `✅ *Tâche ajoutée au planning !*\n\n`;
         confirmation += `📅 ${dateFormatee}\n`;
-        if (tache.heure) confirmation += `🕐 ${tache.heure}\n`;
-        confirmation += `📋 ${tache.activite}\n`;
-        if (tache.personnes && tache.personnes.length > 0) {
-            confirmation += `👤 ${tache.personnes.join(', ')}\n`;
+        if (tacheComplete.heure) confirmation += `🕐 ${tacheComplete.heure}\n`;
+        confirmation += `📋 ${tacheComplete.activite}\n`;
+        if (tacheComplete.personnes && tacheComplete.personnes.length > 0) {
+            confirmation += `👤 ${tacheComplete.personnes.join(', ')}\n`;
         }
-        if (tache.lieu) confirmation += `📍 ${tache.lieu}\n`;
+        if (tacheComplete.lieu) confirmation += `📍 ${tacheComplete.lieu}\n`;
         
         await chat.sendMessage(confirmation);
         
@@ -208,6 +224,59 @@ async function ajouterAuPlanning(tache, chat) {
     } catch (error) {
         console.error('❌ Erreur ajout planning:', error);
         await chat.sendMessage('❌ Erreur lors de l\'ajout au planning. Réessayez plus tard.');
+    }
+}
+
+async function ajouterPlusieursTaches(taches, chat) {
+    try {
+        if (!taches || taches.length === 0) {
+            await chat.sendMessage('❌ Aucune tâche à ajouter.');
+            return;
+        }
+        
+        // Sauvegarder toutes les tâches
+        for (const tache of taches) {
+            const tacheComplete = {
+                date: tache.date || new Date().toISOString().split('T')[0],
+                heure: tache.heure || null,
+                activite: tache.activite || 'Tâche sans description',
+                personnes: tache.personnes || [],
+                lieu: tache.lieu || null,
+                status: tache.status || 'planifie',
+                notes: tache.notes || null
+            };
+            
+            await sauvegarderTachePlanning(tacheComplete);
+        }
+        
+        // Confirmer dans WhatsApp
+        let confirmation = `✅ *${taches.length} tâche(s) ajoutée(s) au planning !*\n\n`;
+        
+        taches.forEach((tache, index) => {
+            const dateFormatee = new Date(tache.date || new Date()).toLocaleDateString('fr-FR', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long'
+            });
+            
+            confirmation += `${index + 1}. `;
+            if (tache.personnes && tache.personnes.length > 0) {
+                confirmation += `${tache.personnes.join(', ')} - `;
+            }
+            confirmation += `${dateFormatee}`;
+            if (tache.heure) confirmation += ` à ${tache.heure}`;
+            if (tache.activite) confirmation += ` - ${tache.activite}`;
+            if (tache.lieu) confirmation += ` (${tache.lieu})`;
+            confirmation += '\n';
+        });
+        
+        await chat.sendMessage(confirmation);
+        
+        console.log(`✅ ${taches.length} tâche(s) ajoutée(s) avec succès`);
+        
+    } catch (error) {
+        console.error('❌ Erreur ajout planning multiple:', error);
+        await chat.sendMessage('❌ Erreur lors de l\'ajout des tâches. Réessayez plus tard.');
     }
 }
 
