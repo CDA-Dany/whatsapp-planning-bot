@@ -3,71 +3,73 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Initialiser Firebase Admin
-let db;
+// Initialisation Firebase Admin
+const serviceAccount = {
+    type: 'service_account',
+    project_id: process.env.FIREBASE_PROJECT_ID,
+    private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    client_email: process.env.FIREBASE_CLIENT_EMAIL,
+};
 
-try {
-    // Configuration avec variables d'environnement
-    const serviceAccount = {
-        projectId: process.env.FIREBASE_PROJECT_ID,
-        privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL
-    };
-    
-    admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-    });
-    
-    db = admin.firestore();
-    console.log('✅ Firebase Admin initialisé');
-    
-} catch (error) {
-    console.error('❌ Erreur initialisation Firebase:', error);
-    throw error;
-}
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+});
+
+const db = admin.firestore();
+
+console.log('✅ Firebase Admin initialisé');
 
 /**
- * Sauvegarde une tâche dans Firestore (collection 'planning')
- * @param {Object} tache - Les données de la tâche
- * @returns {Promise<string>} - L'ID du document créé
+ * Sauvegarde une tâche de planning dans Firestore
  */
 export async function sauvegarderTachePlanning(tache) {
     try {
-        const docId = `tache_${Date.now()}`;
+        const planningRef = db.collection('planning');
         
-        const tacheData = {
-            date: tache.date,
-            heure: tache.heure || null,
-            activite: tache.activite,
-            personnes: tache.personnes || [],
-            lieu: tache.lieu || null,
-            status: tache.status || 'planifie',
-            notes: tache.notes || '',
+        const nouvelleTache = {
+            ...tache,
             createdAt: new Date().toISOString(),
             createdBy: 'whatsapp_bot',
             updatedAt: new Date().toISOString()
         };
         
-        await db.collection('planning').doc(docId).set(tacheData);
+        await planningRef.add(nouvelleTache);
         
-        console.log(`✅ Tâche sauvegardée : ${docId}`);
-        return docId;
-        
+        console.log('✅ Tâche sauvegardée dans Firestore');
+        return true;
     } catch (error) {
-        console.error('❌ Erreur sauvegarde Firestore:', error);
+        console.error('❌ Erreur Firestore:', error);
         throw error;
     }
 }
 
 /**
- * Récupère toutes les tâches du planning
- * @returns {Promise<Array>} - Liste des tâches
+ * Recherche des tâches selon des critères
  */
-export async function recupererToutesLesTaches() {
+export async function rechercherTaches(criteres) {
     try {
-        const snapshot = await db.collection('planning').get();
-        const taches = [];
+        let query = db.collection('planning');
         
+        // Filtrer par date si spécifiée
+        if (criteres.date) {
+            query = query.where('date', '==', criteres.date);
+        }
+        
+        // Filtrer par activité si spécifiée
+        if (criteres.activite) {
+            // Recherche insensible à la casse
+            query = query.where('activite', '>=', criteres.activite)
+                         .where('activite', '<=', criteres.activite + '\uf8ff');
+        }
+        
+        // Filtrer par personne si spécifiée
+        if (criteres.personnes && criteres.personnes.length > 0) {
+            query = query.where('personnes', 'array-contains-any', criteres.personnes);
+        }
+        
+        const snapshot = await query.get();
+        
+        const taches = [];
         snapshot.forEach(doc => {
             taches.push({
                 id: doc.id,
@@ -75,18 +77,75 @@ export async function recupererToutesLesTaches() {
             });
         });
         
+        console.log(`🔍 ${taches.length} tâche(s) trouvée(s)`);
         return taches;
         
     } catch (error) {
-        console.error('❌ Erreur récupération tâches:', error);
+        console.error('❌ Erreur recherche Firestore:', error);
+        throw error;
+    }
+}
+
+/**
+ * Supprime des tâches par leurs IDs
+ */
+export async function supprimerTaches(tacheIds) {
+    try {
+        const batch = db.batch();
+        
+        tacheIds.forEach(id => {
+            const docRef = db.collection('planning').doc(id);
+            batch.delete(docRef);
+        });
+        
+        await batch.commit();
+        
+        console.log(`✅ ${tacheIds.length} tâche(s) supprimée(s)`);
+        return true;
+        
+    } catch (error) {
+        console.error('❌ Erreur suppression Firestore:', error);
+        throw error;
+    }
+}
+
+/**
+ * Modifie des tâches selon des critères
+ */
+export async function modifierTaches(tacheIds, modifications) {
+    try {
+        const batch = db.batch();
+        
+        const updateData = {
+            ...modifications,
+            updatedAt: new Date().toISOString()
+        };
+        
+        // Retirer les champs null/undefined
+        Object.keys(updateData).forEach(key => {
+            if (updateData[key] === null || updateData[key] === undefined) {
+                delete updateData[key];
+            }
+        });
+        
+        tacheIds.forEach(id => {
+            const docRef = db.collection('planning').doc(id);
+            batch.update(docRef, updateData);
+        });
+        
+        await batch.commit();
+        
+        console.log(`✅ ${tacheIds.length} tâche(s) modifiée(s)`);
+        return true;
+        
+    } catch (error) {
+        console.error('❌ Erreur modification Firestore:', error);
         throw error;
     }
 }
 
 /**
  * Met à jour le statut d'une tâche
- * @param {string} tacheId - ID de la tâche
- * @param {string} nouveauStatus - planifie | en_cours | termine
  */
 export async function mettreAJourStatus(tacheId, nouveauStatus) {
     try {
@@ -95,40 +154,11 @@ export async function mettreAJourStatus(tacheId, nouveauStatus) {
             updatedAt: new Date().toISOString()
         });
         
-        console.log(`✅ Status mis à jour : ${tacheId} → ${nouveauStatus}`);
-        
-    } catch (error) {
-        console.error('❌ Erreur mise à jour status:', error);
-        throw error;
-    }
-}
-
-/**
- * Supprime une tâche
- * @param {string} tacheId - ID de la tâche à supprimer
- */
-export async function supprimerTache(tacheId) {
-    try {
-        await db.collection('planning').doc(tacheId).delete();
-        console.log(`✅ Tâche supprimée : ${tacheId}`);
-        
-    } catch (error) {
-        console.error('❌ Erreur suppression tâche:', error);
-        throw error;
-    }
-}
-
-/**
- * Teste la connexion à Firestore
- */
-export async function testerConnexionFirestore() {
-    try {
-        // Essayer de lire la collection planning
-        await db.collection('planning').limit(1).get();
-        console.log('✅ Connexion Firestore réussie !');
+        console.log(`✅ Statut mis à jour: ${nouveauStatus}`);
         return true;
+        
     } catch (error) {
-        console.error('❌ Erreur connexion Firestore:', error.message);
-        return false;
+        console.error('❌ Erreur mise à jour statut:', error);
+        throw error;
     }
 }
