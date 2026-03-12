@@ -189,6 +189,39 @@ export async function mettreAJourStatus(tacheId, nouveauStatus) {
 }
 
 /**
+ * Valide qu'une tâche respecte les règles (Lundi-Jeudi, 7h-16h)
+ */
+export function validerTache(tache) {
+    const erreurs = [];
+    
+    // Vérifier le jour de la semaine
+    if (tache.date) {
+        const date = new Date(tache.date + 'T12:00:00'); // Forcer midi pour éviter problèmes de timezone
+        const jourSemaine = date.getDay(); // 0=Dimanche, 1=Lundi, ..., 6=Samedi
+        
+        // Jours autorisés : Lundi (1) à Jeudi (4)
+        if (jourSemaine < 1 || jourSemaine > 4) {
+            const nomsJours = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+            erreurs.push(`❌ Travail uniquement du Lundi au Jeudi. ${nomsJours[jourSemaine]} n'est pas autorisé.`);
+        }
+    }
+    
+    // Vérifier l'heure si spécifiée
+    if (tache.heure) {
+        const heure = parseInt(tache.heure.split(':')[0]);
+        
+        if (heure < 7 || heure >= 16) {
+            erreurs.push(`❌ Horaires de travail : 7h à 16h. ${tache.heure} n'est pas autorisé.`);
+        }
+    }
+    
+    return {
+        valide: erreurs.length === 0,
+        erreurs: erreurs
+    };
+}
+
+/**
  * Détecte les conflits de planning pour une personne à une date donnée
  */
 export async function detecterConflits(tache) {
