@@ -40,7 +40,10 @@ export async function analyzerMessage(message, senderName, conversationContext =
         });
         
         // Extraire le texte de la réponse
-        const responseText = response.content[0].text;
+        let responseText = response.content[0].text;
+        
+        // Nettoyer les backticks markdown si présents
+        responseText = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
         
         // Parser la réponse JSON
         const result = JSON.parse(responseText);
