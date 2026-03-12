@@ -55,13 +55,6 @@ export async function rechercherTaches(criteres) {
             query = query.where('date', '==', criteres.date);
         }
         
-        // Filtrer par activité si spécifiée
-        if (criteres.activite) {
-            // Recherche insensible à la casse
-            query = query.where('activite', '>=', criteres.activite)
-                         .where('activite', '<=', criteres.activite + '\uf8ff');
-        }
-        
         // Filtrer par personne si spécifiée
         if (criteres.personnes && criteres.personnes.length > 0) {
             query = query.where('personnes', 'array-contains-any', criteres.personnes);
@@ -71,10 +64,42 @@ export async function rechercherTaches(criteres) {
         
         const taches = [];
         snapshot.forEach(doc => {
-            taches.push({
+            const tacheData = {
                 id: doc.id,
                 ...doc.data()
-            });
+            };
+            
+            // Filtres additionnels en mémoire (car Firestore ne permet pas tous les filtres combinés)
+            let correspond = true;
+            
+            // Filtrer par activité si spécifiée (recherche flexible)
+            if (criteres.activite) {
+                const activiteLower = tacheData.activite?.toLowerCase() || '';
+                const lieuLower = tacheData.lieu?.toLowerCase() || '';
+                const critereLower = criteres.activite.toLowerCase();
+                
+                // Chercher dans activité OU lieu
+                const trouveDansActivite = activiteLower.includes(critereLower);
+                const trouveDansLieu = lieuLower.includes(critereLower);
+                
+                if (!trouveDansActivite && !trouveDansLieu) {
+                    correspond = false;
+                }
+            }
+            
+            // Filtrer par lieu si spécifié (en plus de l'activité)
+            if (criteres.lieu) {
+                const lieuLower = tacheData.lieu?.toLowerCase() || '';
+                const critereLieuLower = criteres.lieu.toLowerCase();
+                
+                if (!lieuLower.includes(critereLieuLower)) {
+                    correspond = false;
+                }
+            }
+            
+            if (correspond) {
+                taches.push(tacheData);
+            }
         });
         
         console.log(`🔍 ${taches.length} tâche(s) trouvée(s)`);
