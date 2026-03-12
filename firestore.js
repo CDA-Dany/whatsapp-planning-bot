@@ -239,20 +239,28 @@ export async function detecterConflits(tache) {
  * Vérifie si deux tâches ont des plages horaires qui se chevauchent
  */
 function plagesHorairesChevauchent(tache1, tache2) {
-    // Si l'une des deux est "journée complète" (heure = null), c'est un conflit
-    if (tache1.heure === null || tache2.heure === null) {
-        return true; // Une journée complète chevauche toujours
+    // Si les deux sont "journée complète" (heure = null), c'est un conflit
+    if (tache1.heure === null && tache2.heure === null) {
+        return true; // Deux journées complètes = conflit
+    }
+    
+    // Si tâche existante = journée complète ET nouvelle tâche = heure spécifique
+    // → PAS de conflit ! L'heure spécifique est juste une précision du planning
+    if (tache1.heure === null && tache2.heure !== null) {
+        return false; // Journée complète + heure spécifique = compatible
+    }
+    
+    // Si tâche existante = heure spécifique ET nouvelle tâche = journée complète
+    // → CONFLIT ! La journée complète remplacerait l'heure spécifique
+    if (tache1.heure !== null && tache2.heure === null) {
+        return true; // Heure spécifique + journée complète = conflit
     }
     
     // Les deux ont des heures spécifiques
-    // Pour simplifier : si les heures sont différentes de plus de 2h, pas de conflit
-    // Sinon on considère qu'il peut y avoir chevauchement
-    
     const heure1 = parseInt(tache1.heure.split(':')[0]);
     const heure2 = parseInt(tache2.heure.split(':')[0]);
     
     // Si les heures sont à plus de 3h d'intervalle, pas de chevauchement probable
-    // (on suppose qu'une tâche dure en moyenne 2-3h)
     const ecartHeures = Math.abs(heure1 - heure2);
     
     if (ecartHeures >= 3) {
