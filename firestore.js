@@ -188,10 +188,13 @@ export async function detecterConflits(tache) {
                     ...doc.data()
                 };
                 
-                conflits.push({
-                    personne: personne,
-                    tacheExistante: tacheExistante
-                });
+                // Vérifier le chevauchement des plages horaires
+                if (plagesHorairesChevauchent(tache, tacheExistante)) {
+                    conflits.push({
+                        personne: personne,
+                        tacheExistante: tacheExistante
+                    });
+                }
             });
         }
         
@@ -205,4 +208,32 @@ export async function detecterConflits(tache) {
         console.error('❌ Erreur détection conflits:', error);
         throw error;
     }
+}
+
+/**
+ * Vérifie si deux tâches ont des plages horaires qui se chevauchent
+ */
+function plagesHorairesChevauchent(tache1, tache2) {
+    // Si l'une des deux est "journée complète" (heure = null), c'est un conflit
+    if (tache1.heure === null || tache2.heure === null) {
+        return true; // Une journée complète chevauche toujours
+    }
+    
+    // Les deux ont des heures spécifiques
+    // Pour simplifier : si les heures sont différentes de plus de 2h, pas de conflit
+    // Sinon on considère qu'il peut y avoir chevauchement
+    
+    const heure1 = parseInt(tache1.heure.split(':')[0]);
+    const heure2 = parseInt(tache2.heure.split(':')[0]);
+    
+    // Si les heures sont à plus de 3h d'intervalle, pas de chevauchement probable
+    // (on suppose qu'une tâche dure en moyenne 2-3h)
+    const ecartHeures = Math.abs(heure1 - heure2);
+    
+    if (ecartHeures >= 3) {
+        return false; // Assez d'écart, pas de conflit
+    }
+    
+    // Sinon, considérer comme un conflit potentiel
+    return true;
 }
