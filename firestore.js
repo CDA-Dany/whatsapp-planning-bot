@@ -162,3 +162,47 @@ export async function mettreAJourStatus(tacheId, nouveauStatus) {
         throw error;
     }
 }
+
+/**
+ * Détecte les conflits de planning pour une personne à une date donnée
+ */
+export async function detecterConflits(tache) {
+    try {
+        if (!tache.personnes || tache.personnes.length === 0) {
+            return []; // Pas de personnes = pas de conflit
+        }
+        
+        const conflits = [];
+        
+        // Vérifier pour chaque personne
+        for (const personne of tache.personnes) {
+            const query = db.collection('planning')
+                .where('date', '==', tache.date)
+                .where('personnes', 'array-contains', personne);
+            
+            const snapshot = await query.get();
+            
+            snapshot.forEach(doc => {
+                const tacheExistante = {
+                    id: doc.id,
+                    ...doc.data()
+                };
+                
+                conflits.push({
+                    personne: personne,
+                    tacheExistante: tacheExistante
+                });
+            });
+        }
+        
+        if (conflits.length > 0) {
+            console.log(`⚠️ ${conflits.length} conflit(s) détecté(s)`);
+        }
+        
+        return conflits;
+        
+    } catch (error) {
+        console.error('❌ Erreur détection conflits:', error);
+        throw error;
+    }
+}
