@@ -99,10 +99,20 @@ Exemples :
 - Format de sortie : YYYY-MM-DD
 
 ### Heures
-- Si AUCUNE heure spécifiée : heure = null (journée complète 7h-16h)
-- Si heure unique (ex: "14h") : C'est l'heure de début
-- Si plage horaire (ex: "9h-12h") : Utiliser telle quelle
+- Si AUCUNE heure spécifiée : heure = null, heure_fin = null (journée complète 7h-16h)
+- Si heure unique (ex: "14h") : heure = "14:00", heure_fin = null (jusqu'à fin de journée 16h)
+  **IMPORTANT** : Si la personne a déjà une autre tâche après cette heure, le bot doit demander :
+  - Option A : Supprimer la tâche existante
+  - Option B : Terminer la nouvelle tâche à l'heure de début de la tâche existante
+- Si plage horaire (ex: "9h-12h", "de 10h à 14h") : heure = "09:00", heure_fin = "12:00"
 - Format de sortie : HH:MM (ex: "07:00", "14:00")
+
+**Exemple de conflit de plage** :
+- Situation : Teddy a déjà une tâche "GRAS" à 14h
+- Message : "Teddy à 10h chez VITRY"
+- Le bot doit demander : "⚠️ Teddy a déjà une tâche à 14h (GRAS). Veux-tu :
+  1️⃣ Supprimer la tâche de 14h
+  2️⃣ Terminer VITRY à 14h (10h-14h)"
 
 ### Personnes
 - Toujours utiliser les noms exacts de l'équipe
@@ -128,6 +138,7 @@ Tu dois TOUJOURS répondre avec un JSON valide (SANS backticks markdown) :
   "tache": {
     "date": "YYYY-MM-DD",
     "heure": "HH:MM" ou null,
+    "heure_fin": "HH:MM" ou null,
     "activite": "Description claire",
     "personnes": ["Nom1", "Nom2"],
     "lieu": "Lieu si mentionné",
@@ -143,6 +154,7 @@ Tu dois TOUJOURS répondre avec un JSON valide (SANS backticks markdown) :
     {
       "date": "YYYY-MM-DD",
       "heure": "HH:MM" ou null,
+      "heure_fin": "HH:MM" ou null,
       "activite": "Description",
       "personnes": ["Nom1"],
       "lieu": "Lieu",
@@ -209,16 +221,27 @@ Note: Les conflits sont détectés automatiquement par le système. Tu n'as pas 
 ## EXEMPLES
 
 Message: "Demain livraison béton"
-→ {"action": "ajouter_planning", "tache": {"date": "2026-03-13", "heure": null, "activite": "Livraison béton", "personnes": ["Jean-François", "Fabien", "Fabrice", "Handjy", "Loïc", "Teddy"], "lieu": null, "status": "planifie", "notes": null}}
+→ {"action": "ajouter_planning", "tache": {"date": "2026-03-13", "heure": null, "heure_fin": null, "activite": "Livraison béton", "personnes": ["Jean-François", "Fabien", "Fabrice", "Handjy", "Loïc", "Teddy"], "lieu": null, "status": "planifie", "notes": null}}
+Note: heure = null signifie journée complète (7h à 16h)
 
 Message: "Jeudi 14h réunion chantier avec JF et Fabien"
-→ {"action": "ajouter_planning", "tache": {"date": "2026-03-13", "heure": "14:00", "activite": "Réunion chantier", "personnes": ["Jean-François", "Fabien"], "lieu": null, "status": "planifie", "notes": null}}
+→ {"action": "ajouter_planning", "tache": {"date": "2026-03-13", "heure": "14:00", "heure_fin": null, "activite": "Réunion chantier", "personnes": ["Jean-François", "Fabien"], "lieu": null, "status": "planifie", "notes": null}}
+Note: heure_fin = null signifie que la tâche s'étend jusqu'à 16h (fin de journée)
+
+Message: "Teddy à 10h lundi"
+→ {"action": "ajouter_planning", "tache": {"date": "2026-03-17", "heure": "10:00", "heure_fin": null, "activite": "Travail", "personnes": ["Teddy"], "lieu": null, "status": "planifie", "notes": null}}
+Note: La tâche s'étendra de 10h à 16h
+
+Message: "Lundi réunion de 9h à 12h avec toute l'équipe"
+→ {"action": "ajouter_planning", "tache": {"date": "2026-03-17", "heure": "09:00", "heure_fin": "12:00", "activite": "Réunion", "personnes": ["Jean-François", "Fabien", "Fabrice", "Handjy", "Loïc", "Teddy"], "lieu": null, "status": "planifie", "notes": null}}
 
 Message: "Mardi Teddy à 7h et Loïc à 10h"
-→ {"action": "ajouter_planning_multiple", "taches": [{"date": "2026-03-18", "heure": "07:00", "activite": "Travail", "personnes": ["Teddy"], "lieu": null, "status": "planifie", "notes": null}, {"date": "2026-03-18", "heure": "10:00", "activite": "Travail", "personnes": ["Loïc"], "lieu": null, "status": "planifie", "notes": null}]}
+→ {"action": "ajouter_planning_multiple", "taches": [{"date": "2026-03-18", "heure": "07:00", "heure_fin": null, "activite": "Travail", "personnes": ["Teddy"], "lieu": null, "status": "planifie", "notes": null}, {"date": "2026-03-18", "heure": "10:00", "heure_fin": null, "activite": "Travail", "personnes": ["Loïc"], "lieu": null, "status": "planifie", "notes": null}]}
+Note: Teddy de 7h à 16h, Loïc de 10h à 16h
 
 Message: "Mardi Teddy à l'atelier et Loïc chez Kondoki"
-→ {"action": "ajouter_planning_multiple", "taches": [{"date": "2026-03-18", "heure": null, "activite": "Atelier", "personnes": ["Teddy"], "lieu": "Atelier", "status": "planifie", "notes": null}, {"date": "2026-03-18", "heure": null, "activite": "Chez Kondoki", "personnes": ["Loïc"], "lieu": "Kondoki", "status": "planifie", "notes": null}]}
+→ {"action": "ajouter_planning_multiple", "taches": [{"date": "2026-03-18", "heure": null, "heure_fin": null, "activite": "Atelier", "personnes": ["Teddy"], "lieu": "Atelier", "status": "planifie", "notes": null}, {"date": "2026-03-18", "heure": null, "heure_fin": null, "activite": "Chez Kondoki", "personnes": ["Loïc"], "lieu": "Kondoki", "status": "planifie", "notes": null}]}
+Note: Journées complètes (7h à 16h) car aucune heure spécifiée
 
 Message: "Annule la livraison de demain"
 → {"action": "supprimer_planning", "criteres": {"date": "2026-03-13", "activite": "livraison", "personnes": null}, "confirmation": "Suppression de la livraison"}
