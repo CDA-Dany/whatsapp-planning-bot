@@ -2,7 +2,7 @@ import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import dotenv from 'dotenv';
 import { analyzerMessage } from './claude.js';
-import { sauvegarderTachePlanning, rechercherTaches, supprimerTaches, modifierTaches } from './firestore.js';
+import { sauvegarderTachePlanning, rechercherTaches, supprimerTaches, modifierTaches, detecterConflits } from './firestore.js';
 
 dotenv.config();
 
@@ -30,6 +30,9 @@ const client = new Client({
 
 // Stockage temporaire pour les conversations en cours
 const conversationsEnCours = new Map();
+
+// Stockage temporaire pour les tâches en attente de confirmation (conflits)
+const tachesEnAttente = new Map();
 
 // ========================
 // ÉVÉNEMENTS WHATSAPP
@@ -137,6 +140,56 @@ async function traiterMessage(message, texte, senderName, chat) {
         const conversationId = chat.id._serialized;
         const conversationContext = conversationsEnCours.get(conversationId) || [];
         
+        // PRIORITÉ 1 : Vérifier si c'est une réponse à une confirmation de conflit
+        const tacheEnAttente = tachesEnAttente.get(conversationId);
+        if (tacheEnAttente) {
+            const reponse = texte.toLowerCase().trim();
+            
+            // Réponses positives
+            if (reponse === 'oui' || reponse === 'ok' || reponse === 'modifier' || reponse === 'remplacer' || reponse === 'yes') {
+                
+                if (tacheEnAttente.isMultiple) {
+                    // Cas multiple : supprimer toutes les anciennes et ajouter toutes les nouvelles
+                    for (const item of tacheEnAttente.conflitsMultiples) {
+                        for (const conflit of item.conflits) {
+                            await supprimerTaches([conflit.tacheExistante.id]);
+                        }
+                    }
+                    
+                    // Ajouter toutes les nouvelles tâches
+                    for (const tache of tacheEnAttente.nouvellesTaches) {
+                        await sauvegarderTachePlanning(tache);
+                    }
+                    
+                    await chat.sendMessage(`✅ ${tacheEnAttente.nouvellesTaches.length} tâche(s) modifiée(s) avec succès !`);
+                    
+                } else {
+                    // Cas simple : supprimer l'ancienne et ajouter la nouvelle
+                    await supprimerTaches([tacheEnAttente.conflit.tacheExistante.id]);
+                    await ajouterAuPlanningSansVerification(tacheEnAttente.nouvelleTache, chat);
+                }
+                
+                // Nettoyer
+                tachesEnAttente.delete(conversationId);
+                conversationsEnCours.delete(conversationId);
+                return;
+            }
+            
+            // Réponses négatives
+            if (reponse === 'non' || reponse === 'annuler' || reponse === 'no') {
+                await chat.sendMessage('❌ Ajout annulé. La tâche existante est conservée.');
+                
+                // Nettoyer
+                tachesEnAttente.delete(conversationId);
+                conversationsEnCours.delete(conversationId);
+                return;
+            }
+            
+            // Réponse pas claire
+            await chat.sendMessage('Répondez par "Oui" pour modifier ou "Non" pour annuler.');
+            return;
+        }
+        
         // Analyser avec Claude
         const analyse = await analyzerMessage(texte, senderName, conversationContext);
         
@@ -192,9 +245,9 @@ async function traiterMessage(message, texte, senderName, chat) {
 
 async function ajouterAuPlanning(tache, chat) {
     try {
-        // Ajouter valeurs par défaut si manquantes (pour éviter crash)
+        // Ajouter valeurs par défaut si manquantes
         const tacheComplete = {
-            date: tache.date || new Date().toISOString().split('T')[0], // Par défaut : aujourd'hui
+            date: tache.date || new Date().toISOString().split('T')[0],
             heure: tache.heure || null,
             activite: tache.activite || 'Tâche sans description',
             personnes: tache.personnes || [],
@@ -203,6 +256,52 @@ async function ajouterAuPlanning(tache, chat) {
             notes: tache.notes || null
         };
         
+        // VÉRIFIER LES CONFLITS
+        const conflits = await detecterConflits(tacheComplete);
+        
+        if (conflits.length > 0) {
+            // Il y a un conflit !
+            const conflit = conflits[0]; // Premier conflit
+            const tacheExistante = conflit.tacheExistante;
+            
+            const dateFormatee = new Date(tacheComplete.date).toLocaleDateString('fr-FR', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long'
+            });
+            
+            let message = `⚠️ *Conflit détecté !*\n\n`;
+            message += `${conflit.personne} est déjà prévu(e) ${dateFormatee} :\n`;
+            if (tacheExistante.heure) message += `🕐 ${tacheExistante.heure}\n`;
+            message += `📋 ${tacheExistante.activite}\n`;
+            if (tacheExistante.lieu) message += `📍 ${tacheExistante.lieu}\n`;
+            message += `\n❓ Modifier pour la nouvelle tâche ?\n`;
+            message += `Répondez *Oui* ou *Non*`;
+            
+            await chat.sendMessage(message);
+            
+            // Stocker la tâche en attente
+            const conversationId = chat.id._serialized;
+            tachesEnAttente.set(conversationId, {
+                nouvelleTache: tacheComplete,
+                conflit: conflit
+            });
+            
+            console.log('⚠️ Conflit détecté, attente de confirmation');
+            return;
+        }
+        
+        // Pas de conflit, ajouter normalement
+        await ajouterAuPlanningSansVerification(tacheComplete, chat);
+        
+    } catch (error) {
+        console.error('❌ Erreur ajout planning:', error);
+        await chat.sendMessage('❌ Erreur lors de l\'ajout au planning. Réessayez plus tard.');
+    }
+}
+
+async function ajouterAuPlanningSansVerification(tacheComplete, chat) {
+    try {
         // Sauvegarder dans Firestore
         await sauvegarderTachePlanning(tacheComplete);
         
@@ -228,7 +327,7 @@ async function ajouterAuPlanning(tache, chat) {
         
     } catch (error) {
         console.error('❌ Erreur ajout planning:', error);
-        await chat.sendMessage('❌ Erreur lors de l\'ajout au planning. Réessayez plus tard.');
+        throw error;
     }
 }
 
@@ -239,26 +338,70 @@ async function ajouterPlusieursTaches(taches, chat) {
             return;
         }
         
-        // Sauvegarder toutes les tâches
-        for (const tache of taches) {
-            const tacheComplete = {
-                date: tache.date || new Date().toISOString().split('T')[0],
-                heure: tache.heure || null,
-                activite: tache.activite || 'Tâche sans description',
-                personnes: tache.personnes || [],
-                lieu: tache.lieu || null,
-                status: tache.status || 'planifie',
-                notes: tache.notes || null
-            };
+        // Préparer toutes les tâches
+        const tachesCompletes = taches.map(tache => ({
+            date: tache.date || new Date().toISOString().split('T')[0],
+            heure: tache.heure || null,
+            activite: tache.activite || 'Tâche sans description',
+            personnes: tache.personnes || [],
+            lieu: tache.lieu || null,
+            status: tache.status || 'planifie',
+            notes: tache.notes || null
+        }));
+        
+        // Vérifier les conflits pour toutes les tâches
+        const tousLesConflits = [];
+        for (const tache of tachesCompletes) {
+            const conflits = await detecterConflits(tache);
+            if (conflits.length > 0) {
+                tousLesConflits.push({
+                    tache: tache,
+                    conflits: conflits
+                });
+            }
+        }
+        
+        // Si des conflits existent, demander confirmation
+        if (tousLesConflits.length > 0) {
+            let message = `⚠️ *${tousLesConflits.length} conflit(s) détecté(s) !*\n\n`;
             
-            await sauvegarderTachePlanning(tacheComplete);
+            tousLesConflits.forEach((item, index) => {
+                const conflit = item.conflits[0];
+                const dateFormatee = new Date(item.tache.date).toLocaleDateString('fr-FR', {
+                    weekday: 'long'
+                });
+                
+                message += `${index + 1}. ${conflit.personne} est déjà prévu(e) ${dateFormatee}\n`;
+            });
+            
+            message += `\n❓ Modifier toutes ces tâches ?\n`;
+            message += `Répondez *Oui* ou *Non*`;
+            
+            await chat.sendMessage(message);
+            
+            // Pour simplifier, on traite les tâches multiples comme une seule confirmation
+            // On supprimera toutes les anciennes et ajoutera toutes les nouvelles
+            const conversationId = chat.id._serialized;
+            tachesEnAttente.set(conversationId, {
+                nouvellesTaches: tachesCompletes,
+                conflitsMultiples: tousLesConflits,
+                isMultiple: true
+            });
+            
+            console.log('⚠️ Conflits multiples détectés, attente de confirmation');
+            return;
+        }
+        
+        // Pas de conflits, ajouter toutes les tâches
+        for (const tache of tachesCompletes) {
+            await sauvegarderTachePlanning(tache);
         }
         
         // Confirmer dans WhatsApp
         let confirmation = `✅ *${taches.length} tâche(s) ajoutée(s) au planning !*\n\n`;
         
-        taches.forEach((tache, index) => {
-            const dateFormatee = new Date(tache.date || new Date()).toLocaleDateString('fr-FR', {
+        tachesCompletes.forEach((tache, index) => {
+            const dateFormatee = new Date(tache.date).toLocaleDateString('fr-FR', {
                 weekday: 'long',
                 day: 'numeric',
                 month: 'long'
