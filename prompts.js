@@ -187,6 +187,9 @@ Tu dois TOUJOURS répondre avec un JSON valide (SANS backticks markdown) :
   "raison": "Raison courte"
 }
 
+### Action : Conflit détecté (NE PAS UTILISER - géré automatiquement)
+Note: Les conflits sont détectés automatiquement par le système. Tu n'as pas besoin de les détecter toi-même.
+
 ## EXEMPLES
 
 Message: "Demain livraison béton"
