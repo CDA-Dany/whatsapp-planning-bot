@@ -34,6 +34,9 @@ const conversationsEnCours = new Map();
 // Stockage temporaire pour les tâches en attente de confirmation (conflits)
 const tachesEnAttente = new Map();
 
+// Stockage temporaire pour les modifications en attente de clarification
+const modificationsEnAttente = new Map();
+
 // ========================
 // ÉVÉNEMENTS WHATSAPP
 // ========================
@@ -139,6 +142,89 @@ async function traiterMessage(message, texte, senderName, chat) {
         // Récupérer la conversation en cours pour ce groupe (si elle existe)
         const conversationId = chat.id._serialized;
         const conversationContext = conversationsEnCours.get(conversationId) || [];
+        
+        // PRIORITÉ 0 : Vérifier si c'est une réponse à une clarification de modification/suppression
+        const modifEnAttente = modificationsEnAttente.get(conversationId);
+        if (modifEnAttente) {
+            const reponse = texte.toLowerCase().trim();
+            
+            // Chercher si la réponse correspond à un des lieux/activités proposés
+            let tacheChoisie = null;
+            
+            for (const tache of modifEnAttente.taches) {
+                const lieuLower = tache.lieu?.toLowerCase() || '';
+                const activiteLower = tache.activite?.toLowerCase() || '';
+                
+                // Vérifier si la réponse contient le lieu ou l'activité
+                if ((lieuLower && reponse.includes(lieuLower)) || 
+                    (activiteLower && reponse.includes(activiteLower))) {
+                    tacheChoisie = tache;
+                    break;
+                }
+                
+                // Vérifier aussi les réponses par numéro (1, 2, etc.)
+                const match = reponse.match(/^(\d+)$/);
+                if (match) {
+                    const index = parseInt(match[1]) - 1;
+                    if (index >= 0 && index < modifEnAttente.taches.length) {
+                        tacheChoisie = modifEnAttente.taches[index];
+                        break;
+                    }
+                }
+            }
+            
+            if (tacheChoisie) {
+                if (modifEnAttente.isSuppression) {
+                    // SUPPRESSION
+                    await supprimerTaches([tacheChoisie.id]);
+                    
+                    const dateFormatee = new Date(tacheChoisie.date).toLocaleDateString('fr-FR', {
+                        weekday: 'long',
+                        day: 'numeric',
+                        month: 'long'
+                    });
+                    
+                    let confirmation = `✅ *Tâche supprimée !*\n\n`;
+                    confirmation += `📅 ${dateFormatee}`;
+                    if (tacheChoisie.heure) confirmation += ` à ${tacheChoisie.heure}`;
+                    confirmation += `\n📋 ${tacheChoisie.activite}`;
+                    if (tacheChoisie.lieu) confirmation += ` (${tacheChoisie.lieu})`;
+                    
+                    await chat.sendMessage(confirmation);
+                    
+                } else {
+                    // MODIFICATION
+                    await modifierTaches([tacheChoisie.id], modifEnAttente.modifications);
+                    
+                    const dateFormatee = new Date(modifEnAttente.modifications.date || tacheChoisie.date).toLocaleDateString('fr-FR', {
+                        weekday: 'long',
+                        day: 'numeric',
+                        month: 'long'
+                    });
+                    
+                    let confirmation = `✅ *Tâche modifiée !*\n\n`;
+                    confirmation += `📅 ${dateFormatee}`;
+                    if (modifEnAttente.modifications.heure || tacheChoisie.heure) {
+                        confirmation += ` à ${modifEnAttente.modifications.heure || tacheChoisie.heure}`;
+                    }
+                    confirmation += `\n📋 ${modifEnAttente.modifications.activite || tacheChoisie.activite}`;
+                    if (modifEnAttente.modifications.lieu || tacheChoisie.lieu) {
+                        confirmation += ` (${modifEnAttente.modifications.lieu || tacheChoisie.lieu})`;
+                    }
+                    
+                    await chat.sendMessage(confirmation);
+                }
+                
+                // Nettoyer
+                modificationsEnAttente.delete(conversationId);
+                conversationsEnCours.delete(conversationId);
+                return;
+            } else {
+                // Réponse pas comprise, redemander
+                await chat.sendMessage('❓ Répondez avec le numéro ou le nom du lieu (ex: "1" ou "Gras")');
+                return;
+            }
+        }
         
         // PRIORITÉ 1 : Vérifier si c'est une réponse à une confirmation de conflit
         const tacheEnAttente = tachesEnAttente.get(conversationId);
@@ -438,26 +524,54 @@ async function supprimerDuPlanning(criteres, confirmation, chat) {
             return;
         }
         
-        // Supprimer les tâches
-        const ids = taches.map(t => t.id);
-        await supprimerTaches(ids);
+        // Si plusieurs tâches trouvées, demander laquelle supprimer
+        if (taches.length > 1) {
+            let question = `❓ Plusieurs tâches correspondent. Laquelle supprimer ?\n\n`;
+            
+            taches.forEach((t, index) => {
+                const dateFormatee = new Date(t.date).toLocaleDateString('fr-FR', {
+                    weekday: 'long'
+                });
+                question += `${index + 1}. ${dateFormatee}`;
+                if (t.heure) question += ` ${t.heure}`;
+                question += ` - ${t.activite}`;
+                if (t.lieu) question += ` chez ${t.lieu}`;
+                question += '\n';
+            });
+            
+            question += '\n💬 Répondez avec le numéro ou le lieu (ex: "1" ou "Gras")';
+            await chat.sendMessage(question);
+            
+            // Stocker en attente de réponse (avec flag suppression)
+            const conversationId = chat.id._serialized;
+            modificationsEnAttente.set(conversationId, {
+                taches: taches,
+                isSuppression: true
+            });
+            
+            console.log('❓ Plusieurs tâches trouvées pour suppression, attente de clarification');
+            return;
+        }
+        
+        // Une seule tâche, supprimer directement
+        const tache = taches[0];
+        await supprimerTaches([tache.id]);
         
         // Confirmation dans WhatsApp
-        let message = `✅ *${taches.length} tâche(s) supprimée(s) !*\n\n`;
-        
-        taches.forEach(t => {
-            const dateFormatee = new Date(t.date).toLocaleDateString('fr-FR', {
-                weekday: 'long',
-                day: 'numeric',
-                month: 'long'
-            });
-            message += `📅 ${dateFormatee}`;
-            if (t.heure) message += ` à ${t.heure}`;
-            message += `\n📋 ${t.activite}\n\n`;
+        const dateFormatee = new Date(tache.date).toLocaleDateString('fr-FR', {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long'
         });
         
+        let message = `✅ *Tâche supprimée !*\n\n`;
+        message += `📅 ${dateFormatee}`;
+        if (tache.heure) message += ` à ${tache.heure}`;
+        message += `\n📋 ${tache.activite}`;
+        if (tache.lieu) message += ` (${tache.lieu})`;
+        
         await chat.sendMessage(message);
-        console.log('✅ Tâche(s) supprimée(s) avec succès');
+        console.log('✅ Tâche supprimée avec succès');
         
     } catch (error) {
         console.error('❌ Erreur suppression planning:', error);
@@ -475,32 +589,62 @@ async function modifierLePlanning(criteres, modifications, confirmation, chat) {
             return;
         }
         
-        // Modifier les tâches
-        const ids = taches.map(t => t.id);
+        // Si plusieurs tâches trouvées, demander laquelle modifier
+        if (taches.length > 1) {
+            let question = `❓ Plusieurs tâches correspondent. Laquelle modifier ?\n\n`;
+            
+            taches.forEach((t, index) => {
+                const dateFormatee = new Date(t.date).toLocaleDateString('fr-FR', {
+                    weekday: 'long'
+                });
+                question += `${index + 1}. ${dateFormatee}`;
+                if (t.heure) question += ` ${t.heure}`;
+                question += ` - ${t.activite}`;
+                if (t.lieu) question += ` chez ${t.lieu}`;
+                question += '\n';
+            });
+            
+            question += '\n💬 Répondez avec le numéro ou le lieu (ex: "1" ou "Gras")';
+            await chat.sendMessage(question);
+            
+            // Stocker en attente de réponse
+            const conversationId = chat.id._serialized;
+            modificationsEnAttente.set(conversationId, {
+                taches: taches,
+                modifications: modifications
+            });
+            
+            console.log('❓ Plusieurs tâches trouvées, attente de clarification');
+            return;
+        }
+        
+        // Une seule tâche, modifier directement
+        const tache = taches[0];
+        const ids = [tache.id];
         await modifierTaches(ids, modifications);
         
         // Confirmation dans WhatsApp
-        let message = `✅ *${taches.length} tâche(s) modifiée(s) !*\n\n`;
-        
-        taches.forEach(t => {
-            const dateFormatee = new Date(modifications.date || t.date).toLocaleDateString('fr-FR', {
-                weekday: 'long',
-                day: 'numeric',
-                month: 'long'
-            });
-            message += `📅 ${dateFormatee}`;
-            if (modifications.heure || t.heure) {
-                message += ` à ${modifications.heure || t.heure}`;
-            }
-            message += `\n📋 ${modifications.activite || t.activite}\n`;
-            if (modifications.personnes || t.personnes) {
-                message += `👤 ${(modifications.personnes || t.personnes).join(', ')}\n`;
-            }
-            message += '\n';
+        const dateFormatee = new Date(modifications.date || tache.date).toLocaleDateString('fr-FR', {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long'
         });
         
+        let message = `✅ *Tâche modifiée !*\n\n`;
+        message += `📅 ${dateFormatee}`;
+        if (modifications.heure || tache.heure) {
+            message += ` à ${modifications.heure || tache.heure}`;
+        }
+        message += `\n📋 ${modifications.activite || tache.activite}`;
+        if (modifications.lieu || tache.lieu) {
+            message += ` (${modifications.lieu || tache.lieu})`;
+        }
+        if (modifications.personnes || tache.personnes) {
+            message += `\n👤 ${(modifications.personnes || tache.personnes).join(', ')}`;
+        }
+        
         await chat.sendMessage(message);
-        console.log('✅ Tâche(s) modifiée(s) avec succès');
+        console.log('✅ Tâche modifiée avec succès');
         
     } catch (error) {
         console.error('❌ Erreur modification planning:', error);
