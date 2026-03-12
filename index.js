@@ -346,10 +346,57 @@ async function ajouterAuPlanning(tache, chat) {
         const conflits = await detecterConflits(tacheComplete);
         
         if (conflits.length > 0) {
-            // Il y a un conflit !
-            const conflit = conflits[0]; // Premier conflit
+            // Analyser le type de conflit
+            const conflit = conflits[0];
             const tacheExistante = conflit.tacheExistante;
             
+            // CAS SPÉCIAL : Si la nouvelle tâche contient un sous-ensemble des personnes de l'ancienne
+            const personnesExistantes = tacheExistante.personnes || [];
+            const nouvellesPersonnes = tacheComplete.personnes || [];
+            
+            const estSousEnsemble = nouvellesPersonnes.length > 0 && 
+                                    personnesExistantes.length > nouvellesPersonnes.length &&
+                                    nouvellesPersonnes.every(p => personnesExistantes.includes(p));
+            
+            if (estSousEnsemble) {
+                // Retirer les personnes de la tâche existante au lieu de tout supprimer
+                const personnesRestantes = personnesExistantes.filter(p => !nouvellesPersonnes.includes(p));
+                
+                if (personnesRestantes.length > 0) {
+                    // Modifier la tâche existante pour enlever les personnes qui partent
+                    await modifierTaches([tacheExistante.id], {
+                        personnes: personnesRestantes
+                    });
+                    
+                    // Ajouter la nouvelle tâche
+                    await ajouterAuPlanningSansVerification(tacheComplete, chat);
+                    
+                    const dateFormatee = new Date(tacheComplete.date).toLocaleDateString('fr-FR', {
+                        weekday: 'long',
+                        day: 'numeric',
+                        month: 'long'
+                    });
+                    
+                    let message = `✅ *Planning mis à jour !*\n\n`;
+                    message += `➖ ${nouvellesPersonnes.join(', ')} retirés de "${tacheExistante.activite}"\n`;
+                    message += `➕ Nouvelle tâche créée :\n`;
+                    message += `📅 ${dateFormatee}\n`;
+                    if (tacheComplete.heure) message += `🕐 ${tacheComplete.heure}\n`;
+                    message += `📋 ${tacheComplete.activite}\n`;
+                    message += `👤 ${nouvellesPersonnes.join(', ')}\n`;
+                    if (tacheComplete.lieu) message += `📍 ${tacheComplete.lieu}\n`;
+                    
+                    await chat.sendMessage(message);
+                    
+                    console.log('✅ Sous-ensemble extrait avec succès');
+                    return;
+                } else {
+                    // Tous partent, comportement normal (supprimer et remplacer)
+                    // Continue vers le conflit normal ci-dessous
+                }
+            }
+            
+            // CONFLIT NORMAL : Demander confirmation
             const dateFormatee = new Date(tacheComplete.date).toLocaleDateString('fr-FR', {
                 weekday: 'long',
                 day: 'numeric',
@@ -447,8 +494,51 @@ async function ajouterPlusieursTaches(taches, chat) {
             }
         }
         
-        // Si des conflits existent, demander confirmation
+        // Si des conflits existent, vérifier si c'est un cas de sous-ensemble
         if (tousLesConflits.length > 0) {
+            // Vérifier si tous les conflits pointent vers la même tâche existante
+            const premiereTacheExistante = tousLesConflits[0].conflits[0].tacheExistante;
+            const tousMemeTache = tousLesConflits.every(item => 
+                item.conflits.every(c => c.tacheExistante.id === premiereTacheExistante.id)
+            );
+            
+            if (tousMemeTache) {
+                // Toutes les personnes en conflit sont dans la même tâche
+                const personnesExistantes = premiereTacheExistante.personnes || [];
+                const toutesNouvellesPersonnes = tachesCompletes.flatMap(t => t.personnes || []);
+                
+                const estSousEnsemble = toutesNouvellesPersonnes.length > 0 && 
+                                        personnesExistantes.length > toutesNouvellesPersonnes.length &&
+                                        toutesNouvellesPersonnes.every(p => personnesExistantes.includes(p));
+                
+                if (estSousEnsemble) {
+                    // Retirer les personnes de la tâche existante
+                    const personnesRestantes = personnesExistantes.filter(p => !toutesNouvellesPersonnes.includes(p));
+                    
+                    if (personnesRestantes.length > 0) {
+                        // Modifier la tâche existante
+                        await modifierTaches([premiereTacheExistante.id], {
+                            personnes: personnesRestantes
+                        });
+                        
+                        // Ajouter toutes les nouvelles tâches
+                        for (const tache of tachesCompletes) {
+                            await sauvegarderTachePlanning(tache);
+                        }
+                        
+                        let message = `✅ *Planning mis à jour !*\n\n`;
+                        message += `➖ ${toutesNouvellesPersonnes.join(', ')} retirés de "${premiereTacheExistante.activite}"\n`;
+                        message += `➕ ${tachesCompletes.length} nouvelle(s) tâche(s) créée(s)\n`;
+                        
+                        await chat.sendMessage(message);
+                        
+                        console.log('✅ Sous-ensemble extrait avec succès (multiple)');
+                        return;
+                    }
+                }
+            }
+            
+            // Sinon, comportement normal de demande de confirmation
             let message = `⚠️ *${tousLesConflits.length} conflit(s) détecté(s) !*\n\n`;
             
             tousLesConflits.forEach((item, index) => {
@@ -466,7 +556,6 @@ async function ajouterPlusieursTaches(taches, chat) {
             await chat.sendMessage(message);
             
             // Pour simplifier, on traite les tâches multiples comme une seule confirmation
-            // On supprimera toutes les anciennes et ajoutera toutes les nouvelles
             const conversationId = chat.id._serialized;
             tachesEnAttente.set(conversationId, {
                 nouvellesTaches: tachesCompletes,
