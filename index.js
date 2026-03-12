@@ -47,6 +47,9 @@ client.on('qr', (qr) => {
 client.on('ready', () => {
     console.log('✅ Bot WhatsApp connecté et prêt !');
     console.log(`📋 Écoute du groupe : ${GROUP_NAME}`);
+    if (GROUP_ID) {
+        console.log(`📋 ID du groupe : ${GROUP_ID}`);
+    }
 });
 
 client.on('authenticated', () => {
@@ -69,18 +72,36 @@ client.on('message', async (message) => {
     try {
         const chat = await message.getChat();
         
+        // DEBUG: Afficher TOUS les messages reçus
+        console.log('\n📨 Message reçu:');
+        console.log('  Type:', chat.isGroup ? 'Groupe' : 'Privé');
+        console.log('  Nom du chat:', chat.name);
+        console.log('  ID du chat:', chat.id._serialized);
+        console.log('  Contenu:', message.body);
+        console.log('  De moi?', message.fromMe);
+        
         // Vérifier si c'est le bon groupe
         const isTargetGroup = chat.isGroup && (
             chat.name === GROUP_NAME || 
             (GROUP_ID && chat.id._serialized === GROUP_ID)
         );
         
+        console.log('  Groupe cible configuré:', GROUP_NAME);
+        console.log('  Est le groupe cible?', isTargetGroup);
+        console.log('---');
+        
         if (!isTargetGroup) {
+            if (DEBUG) {
+                console.log('⚠️ Message ignoré - Pas le groupe cible');
+            }
             return; // Ignorer les autres conversations
         }
         
         // Ignorer les messages du bot lui-même
         if (message.fromMe) {
+            if (DEBUG) {
+                console.log('⚠️ Message ignoré - Envoyé par le bot');
+            }
             return;
         }
         
@@ -89,7 +110,7 @@ client.on('message', async (message) => {
         const senderName = contact.pushname || contact.name || 'Inconnu';
         
         if (DEBUG) {
-            console.log(`\n📩 Message de ${senderName}: "${messageText}"`);
+            console.log(`\n📩 Message à traiter de ${senderName}: "${messageText}"`);
         }
         
         // Ignorer les messages vides ou les médias sans texte
