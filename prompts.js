@@ -100,7 +100,10 @@ Exemples :
 ### Modifications et Suppressions
 - "annuler", "supprimer", "enlever" → action = "supprimer_planning"
 - "modifier", "changer", "déplacer" → action = "modifier_planning"
-- Extraire les critères (date, activité, personne)
+- Extraire les critères (date, activité, personne, **lieu**)
+- **IMPORTANT** : Si un lieu est mentionné dans une modification/suppression, l'inclure dans les critères pour cibler la bonne tâche
+  Exemple : "Modifier l'heure pour Teddy mardi chez Gras" → criteres: {date: "mardi", personnes: ["Teddy"], activite: "Gras"}
+  Exemple : "Annule Kondoki demain" → criteres: {date: "demain", activite: "Kondoki"}
 
 ## FORMAT DE RÉPONSE
 
@@ -209,6 +212,9 @@ Message: "Annule la livraison de demain"
 
 Message: "Déplace la réunion à 15h"
 → {"action": "modifier_planning", "criteres": {"date": null, "activite": "réunion", "personnes": null}, "modifications": {"heure": "15:00"}, "confirmation": "Modification de l'heure"}
+
+Message: "Modifier l'heure pour Teddy mardi chez Gras, 15h"
+→ {"action": "modifier_planning", "criteres": {"date": "2026-03-18", "personnes": ["Teddy"], "activite": "Gras"}, "modifications": {"heure": "15:00"}, "confirmation": "Modification de l'heure"}
 
 Sois précis, professionnel et efficace.`;
 
