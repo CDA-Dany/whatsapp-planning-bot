@@ -29,6 +29,49 @@ Tu analyses les messages WhatsApp pour :
 3. Supprimer des tâches
 4. Répondre aux questions sur le planning
 
+## GESTION DES CONVERSATIONS MULTI-TOURS
+
+**IMPORTANT** : Tu as accès à l'historique de la conversation. Utilise-le !
+
+### Quand tu as demandé une précision
+Si tu as demandé "Qui sera chez Kondoki ?" et que l'utilisateur répond "Teddy" :
+- C'est une **réponse à ta question**
+- Combine la réponse avec les infos partielles
+- Retourne "ajouter_planning" avec TOUTES les infos
+
+### Exemple de conversation
+```
+Tour 1:
+User: "Demain chez Kondoki"
+Assistant: {"action": "demander_precision", "question": "Qui sera chez Kondoki demain ?"}
+
+Tour 2:
+User: "Teddy"
+Assistant: {"action": "ajouter_planning", "tache": {"date": "2026-03-13", "heure": null, "activite": "Chez Kondoki", "personnes": ["Teddy"], "lieu": "Kondoki", "status": "planifie", "notes": null}}
+```
+
+### Si la réponse est incomplète
+```
+Tour 1:
+User: "Demain livraison"
+Assistant: {"action": "demander_precision", "question": "À quelle heure et pour qui est la livraison ?"}
+
+Tour 2:
+User: "14h"
+Assistant: {"action": "demander_precision", "question": "Pour qui est la livraison de demain à 14h ?"}
+
+Tour 3:
+User: "Teddy"
+Assistant: {"action": "ajouter_planning", "tache": {...}}
+```
+
+### Détection des réponses
+Une réponse courte (1-3 mots) après une question = probablement une réponse
+- "Teddy" = nom
+- "14h" = heure
+- "Lundi" = date
+- "Kondoki" = lieu
+
 ## RÈGLES IMPORTANTES
 
 ### Messages avec PLUSIEURS tâches
@@ -182,7 +225,38 @@ Sois précis, professionnel et efficace.`;
 
 export const USER_PROMPT_TEMPLATE = `DATE ET HEURE ACTUELLES : {CURRENT_DATE} à {CURRENT_TIME}
 
-MESSAGE de {SENDER} :
+{CONVERSATION_HISTORY}
+
+MESSAGE ACTUEL de {SENDER} :
 "{MESSAGE}"
 
-Analyse ce message et réponds en JSON (SANS backticks markdown).`;
+{INSTRUCTION}`;
+
+export function buildUserPrompt(message, senderName, hasHistory) {
+    const now = new Date();
+    const currentDate = now.toLocaleDateString('fr-FR', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+    });
+    const currentTime = now.toLocaleTimeString('fr-FR', {
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+    
+    let instruction;
+    if (hasHistory) {
+        instruction = "C'est probablement une RÉPONSE à ta question précédente. Combine les infos et crée la tâche si tu as tout.";
+    } else {
+        instruction = "Analyse ce message et réponds en JSON (SANS backticks markdown).";
+    }
+    
+    return USER_PROMPT_TEMPLATE
+        .replace('{CURRENT_DATE}', currentDate)
+        .replace('{CURRENT_TIME}', currentTime)
+        .replace('{CONVERSATION_HISTORY}', hasHistory ? '(Tu as déjà posé une question dans cette conversation)' : '')
+        .replace('{MESSAGE}', message)
+        .replace('{SENDER}', senderName)
+        .replace('{INSTRUCTION}', instruction);
+}
