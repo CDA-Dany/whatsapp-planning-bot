@@ -33,7 +33,7 @@ export async function analyzerMessage(message, senderName, conversationContext =
         
         // Appel à l'API Claude
         const response = await anthropic.messages.create({
-            model: 'claude-3-5-sonnet-20250514',
+            model: 'claude-sonnet-4-6',
             max_tokens: 1024,
             system: SYSTEM_PROMPT,
             messages: messages
@@ -69,7 +69,7 @@ export async function analyzerMessage(message, senderName, conversationContext =
 export async function testerConnexionClaude() {
     try {
         const response = await anthropic.messages.create({
-            model: 'claude-3-5-sonnet-20250514',
+            model: 'claude-sonnet-4-6',
             max_tokens: 100,
             messages: [{
                 role: 'user',
