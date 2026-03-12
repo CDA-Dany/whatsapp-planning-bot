@@ -1,6 +1,5 @@
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
-import qrcode from 'qrcode-terminal';
 import dotenv from 'dotenv';
 import { analyzerMessage } from './claude.js';
 import { sauvegarderTachePlanning, rechercherTaches, supprimerTaches, modifierTaches } from './firestore.js';
@@ -37,9 +36,15 @@ const conversationsEnCours = new Map();
 // ========================
 
 client.on('qr', (qr) => {
-    console.log('\n📱 SCAN QR CODE WHATSAPP\n');
-    qrcode.generate(qr, { small: true });
-    console.log('\n');
+    // Générer l'URL du QR code
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(qr)}`;
+    
+    console.log('\n========================================');
+    console.log('📱 SCAN QR CODE WHATSAPP');
+    console.log('========================================');
+    console.log('\n🌐 Ouvre cette URL dans ton navigateur :');
+    console.log('\n' + qrUrl + '\n');
+    console.log('========================================\n');
 });
 
 client.on('ready', () => {
