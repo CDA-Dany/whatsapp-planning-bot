@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import dotenv from 'dotenv';
-import { SYSTEM_PROMPT, USER_PROMPT_TEMPLATE } from './prompts.js';
+import { SYSTEM_PROMPT, buildUserPrompt } from './prompts.js';
 
 dotenv.config();
 
@@ -17,25 +17,11 @@ const anthropic = new Anthropic({
  */
 export async function analyzerMessage(message, senderName, conversationContext = []) {
     try {
-        // Obtenir la date et heure actuelles
-        const now = new Date();
-        const currentDate = now.toLocaleDateString('fr-FR', {
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
-        });
-        const currentTime = now.toLocaleTimeString('fr-FR', {
-            hour: '2-digit',
-            minute: '2-digit'
-        });
+        // Vérifier s'il y a un historique de conversation
+        const hasHistory = conversationContext.length > 0;
         
-        // Construire le prompt utilisateur avec date/heure
-        const userPrompt = USER_PROMPT_TEMPLATE
-            .replace('{CURRENT_DATE}', currentDate)
-            .replace('{CURRENT_TIME}', currentTime)
-            .replace('{MESSAGE}', message)
-            .replace('{SENDER}', senderName);
+        // Construire le prompt utilisateur avec contexte
+        const userPrompt = buildUserPrompt(message, senderName, hasHistory);
         
         // Construire l'historique de conversation pour Claude
         const messages = [
@@ -45,6 +31,12 @@ export async function analyzerMessage(message, senderName, conversationContext =
                 content: userPrompt
             }
         ];
+        
+        // Log pour debug
+        if (hasHistory && process.env.DEBUG === 'true') {
+            console.log('🔄 Conversation en cours (contexte présent)');
+            console.log('Historique:', conversationContext.length, 'messages');
+        }
         
         // Appel à l'API Claude
         const response = await anthropic.messages.create({
