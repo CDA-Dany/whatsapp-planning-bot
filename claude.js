@@ -17,8 +17,23 @@ const anthropic = new Anthropic({
  */
 export async function analyzerMessage(message, senderName, conversationContext = []) {
     try {
-        // Construire le prompt utilisateur
+        // Obtenir la date et heure actuelles
+        const now = new Date();
+        const currentDate = now.toLocaleDateString('fr-FR', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        });
+        const currentTime = now.toLocaleTimeString('fr-FR', {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        
+        // Construire le prompt utilisateur avec date/heure
         const userPrompt = USER_PROMPT_TEMPLATE
+            .replace('{CURRENT_DATE}', currentDate)
+            .replace('{CURRENT_TIME}', currentTime)
             .replace('{MESSAGE}', message)
             .replace('{SENDER}', senderName);
         
@@ -56,6 +71,7 @@ export async function analyzerMessage(message, senderName, conversationContext =
         // Si erreur de parsing JSON, retourner une action par défaut
         if (error instanceof SyntaxError) {
             console.error('⚠️ Erreur parsing JSON de Claude');
+            console.error('Réponse brute:', error.message);
             return {
                 action: 'ignorer',
                 raison: 'Erreur de parsing de la réponse'
