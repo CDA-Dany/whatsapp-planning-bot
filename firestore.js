@@ -303,3 +303,75 @@ function plagesHorairesChevauchent(tache1, tache2) {
     // Sinon, considérer comme un conflit potentiel
     return true;
 }
+
+/**
+ * Détecte si une tâche avec heure de début mais sans heure de fin
+ * entre en conflit avec d'autres tâches de la même personne
+ */
+export async function detecterConflitPlageHoraire(tache) {
+    try {
+        // Cette fonction s'applique uniquement si :
+        // 1. La tâche a une heure de début
+        // 2. La tâche n'a PAS d'heure de fin (donc irait jusqu'à 16h)
+        if (!tache.heure || tache.heure_fin) {
+            return null; // Pas concerné
+        }
+        
+        if (!tache.personnes || tache.personnes.length === 0) {
+            return null;
+        }
+        
+        // Chercher toutes les tâches de la même personne le même jour
+        const conflitsPlage = [];
+        
+        for (const personne of tache.personnes) {
+            const query = db.collection('planning')
+                .where('date', '==', tache.date)
+                .where('personnes', 'array-contains', personne);
+            
+            const snapshot = await query.get();
+            
+            // Convertir heure de début en minutes
+            const [h, m] = tache.heure.split(':').map(Number);
+            const heureDebutMinutes = h * 60 + m;
+            
+            // Chercher la prochaine tâche après l'heure de début
+            let prochaineTache = null;
+            let prochaineHeureMinutes = 16 * 60; // Par défaut : 16h
+            
+            snapshot.forEach(doc => {
+                const tacheExistante = {
+                    id: doc.id,
+                    ...doc.data()
+                };
+                
+                if (tacheExistante.heure) {
+                    const [h2, m2] = tacheExistante.heure.split(':').map(Number);
+                    const heureExistanteMinutes = h2 * 60 + m2;
+                    
+                    // Si la tâche existante commence après notre nouvelle tâche
+                    // ET avant la prochaine tâche trouvée
+                    if (heureExistanteMinutes > heureDebutMinutes && 
+                        heureExistanteMinutes < prochaineHeureMinutes) {
+                        prochaineTache = tacheExistante;
+                        prochaineHeureMinutes = heureExistanteMinutes;
+                    }
+                }
+            });
+            
+            if (prochaineTache) {
+                conflitsPlage.push({
+                    personne: personne,
+                    tacheExistante: prochaineTache,
+                    heureConflituelle: prochaineTache.heure
+                });
+            }
+        }
+        
+        return conflitsPlage.length > 0 ? conflitsPlage : null;
+        
+    } catch (error) {
+        console.error('❌ Erreur détection conflit plage horaire:', error);
+        return null;
+    }
+}
