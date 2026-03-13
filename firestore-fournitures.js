@@ -1,6 +1,8 @@
-// Ce fichier remplace les anciennes fonctions fournitures dans firestore.js
+// Gestion des fournitures pour le bot WhatsApp
+import admin from 'firebase-admin';
 
-import { db } from './firestore.js';
+// Utiliser l'instance Firebase déjà initialisée
+const db = admin.firestore();
 
 // ========================
 // GESTION FOURNITURES
