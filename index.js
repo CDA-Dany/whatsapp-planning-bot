@@ -1016,7 +1016,6 @@ async function ajouterFourniture(achat, chat) {
         
         // Calculer progression
         const nouvelleQuantiteValidee = resultat.quantite_totale_validee;
-        const quantitePrevue = resultat.quantite_prevue;
         const progression = Math.round((nouvelleQuantiteValidee / quantitePrevue) * 100);
         
         // Message de confirmation
