@@ -334,7 +334,6 @@ Pour un achat :
 ### ACTIONS DISPONIBLES
 
 #### 1. Ajouter fourniture (avec quantité)
-```json
 {
   "action": "ajouter_fourniture",
   "achat": {
@@ -346,10 +345,8 @@ Pour un achat :
     "notes": null
   }
 }
-```
 
 #### 2. Marquer fourniture terminée (SANS quantité)
-```json
 {
   "action": "terminer_fourniture",
   "terminer": {
@@ -358,23 +355,18 @@ Pour un achat :
     "raison": "quantités suffisantes"
   }
 }
-```
 
 #### 3. Demander le coût (après validation)
-```json
 {
   "action": "demander_cout_fourniture",
   "question": "💰 Combien as-tu payé par m² ?"
 }
-```
 
 #### 4. Demander précision fourniture
-```json
 {
   "action": "demander_precision_fourniture",
   "question": "Pour quel chantier et quelle quantité ?"
 }
-```
 
 ### EXEMPLES COMPLETS
 
