@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { analyzerMessage } from './claude.js';
 import { sauvegarderTachePlanning, rechercherTaches, supprimerTaches, modifierTaches, detecterConflits, validerTache, detecterConflitPlageHoraire } from './firestore.js';
 import { rechercherFourniture, ajouterQuantiteFourniture } from './firestore-fournitures.js';
+import { ajouterValidation, convertirUnite, getValidationsExistantes, marquerTermine } from './firestore-validations.js';
 
 dotenv.config();
 
@@ -388,6 +389,11 @@ async function traiterMessage(message, texte, senderName, chat) {
                 
             case 'ajouter_fourniture':
                 await ajouterFourniture(analyse.achat, chat);
+                conversationsEnCours.delete(conversationId);
+                break;
+                
+            case 'terminer_fourniture':
+                await terminerFourniture(analyse.terminer, chat);
                 conversationsEnCours.delete(conversationId);
                 break;
                 
@@ -936,7 +942,7 @@ async function demanderPrecision(question, chat) {
 
 async function ajouterFourniture(achat, chat) {
     try {
-        const { chantier, fourniture, quantite, unite, notes } = achat;
+        const { chantier, fourniture, quantite, unite, notes, cout } = achat;
         
         console.log(`📦 Ajout fourniture: ${quantite} ${fourniture} pour ${chantier}`);
         
@@ -948,35 +954,163 @@ async function ajouterFourniture(achat, chat) {
             return;
         }
         
-        // Ajouter la quantité
-        const resultat = await ajouterQuantiteFourniture(fournitureTrouvee.id, quantite);
+        // Vérifier si conversion d'unité nécessaire
+        const uniteBot = unite || fournitureTrouvee.unite;
+        const uniteFirestore = fournitureTrouvee.unite;
         
-        // Calcul progression
-        const progression = Math.round((resultat.quantite_utilisee / resultat.quantite_prevue) * 100);
+        let quantiteConvertie = quantite;
+        let messageConversion = '';
+        
+        if (uniteBot !== uniteFirestore) {
+            const converted = convertirUnite(quantite, uniteBot, uniteFirestore, fournitureTrouvee.nom);
+            if (converted !== null) {
+                quantiteConvertie = converted;
+                messageConversion = `🔄 Conversion: ${quantite} ${uniteBot} = ${quantiteConvertie.toFixed(2)} ${uniteFirestore}\n`;
+                console.log(`🔄 Conversion: ${quantite} ${uniteBot} → ${quantiteConvertie} ${uniteFirestore}`);
+            } else {
+                await chat.sendMessage(`❌ Impossible de convertir ${uniteBot} en ${uniteFirestore} pour "${fournitureTrouvee.nom}".`);
+                return;
+            }
+        }
+        
+        // Trouver l'index de la fourniture dans le CSV
+        const fichier = `${chantier.toLowerCase()}.csv`;
+        const ligneIndex = fournitureTrouvee.index;
+        
+        if (ligneIndex === undefined || ligneIndex === null) {
+            await chat.sendMessage(`❌ Impossible de trouver l'index de la fourniture dans le CSV.`);
+            return;
+        }
+        
+        // Vérifier les validations existantes
+        const validationsExistantes = await getValidationsExistantes(fichier, ligneIndex);
+        const dejaValide = validationsExistantes.reduce((sum, v) => sum + (v.quantite || 0), 0);
+        const quantitePrevue = fournitureTrouvee.quantite;
+        
+        // Calculer le coût (demander si pas fourni)
+        let coutUnitaire = cout;
+        if (!coutUnitaire || coutUnitaire === 0) {
+            // Utiliser le coût prévu par défaut
+            coutUnitaire = fournitureTrouvee.cout_local || 0;
+            console.log(`💰 Coût non fourni, utilisation du coût prévu: ${coutUnitaire}€`);
+        }
+        
+        // Ajouter la validation (comme le site le fait)
+        const resultat = await ajouterValidation(
+            fichier,
+            ligneIndex,
+            {
+                quantite: quantiteConvertie,
+                cout: coutUnitaire,
+                prix: quantiteConvertie * coutUnitaire
+            },
+            fournitureTrouvee
+        );
+        
+        // Mettre à jour aussi quantite_utilisee dans la collection du chantier (pour compatibilité)
+        await ajouterQuantiteFourniture(
+            fournitureTrouvee.id,
+            quantiteConvertie,
+            fournitureTrouvee.collection
+        );
+        
+        // Calculer progression
+        const nouvelleQuantiteValidee = resultat.quantite_totale_validee;
+        const quantitePrevue = resultat.quantite_prevue;
+        const progression = Math.round((nouvelleQuantiteValidee / quantitePrevue) * 100);
         
         // Message de confirmation
-        let message = `✅ *Fourniture validée !*\n\n`;
-        message += `📦 ${resultat.nom}\n`;
+        let message = `✅ *Fourniture validée par le bot !*\n\n`;
+        message += messageConversion;
+        message += `📦 ${fournitureTrouvee.nom}\n`;
         message += `📍 Chantier : ${chantier.toUpperCase()}\n`;
-        message += `➕ Quantité ajoutée : ${resultat.quantite_ajoutee} ${fournitureTrouvee.unite}\n`;
-        message += `📊 Total utilisé : ${resultat.quantite_utilisee}/${resultat.quantite_prevue} (${progression}%)\n`;
+        message += `➕ Quantité validée : ${quantiteConvertie.toFixed(2)} ${uniteFirestore}\n`;
+        message += `💰 Coût unitaire : ${coutUnitaire.toFixed(2)}€\n`;
+        message += `💵 Prix total : ${resultat.prix_valide.toFixed(2)}€\n`;
+        message += `📊 Total validé : ${nouvelleQuantiteValidee.toFixed(2)}/${quantitePrevue} ${uniteFirestore} (${progression}%)\n`;
+        
+        // Statut checked
+        if (resultat.checked) {
+            message += `\n✓ *Ligne complète et cochée !*`;
+        }
         
         // Alertes
-        if (progression >= 100) {
-            message += `\n⚠️ *ALERTE : Stock dépassé à ${progression}% !*`;
-        } else if (progression >= 90) {
-            message += `\n⚠️ *Attention : ${progression}% du stock utilisé !*`;
-        } else if (progression >= 70) {
-            message += `\n💡 Stock à ${progression}%`;
+        if (progression >= 100 && !resultat.checked) {
+            message += `\n⚠️ *ALERTE : Quantité dépassée (${progression}%) !*`;
+        } else if (progression >= 90 && !resultat.checked) {
+            message += `\n⚠️ *Attention : ${progression}% validé !*`;
+        } else if (progression >= 70 && !resultat.checked) {
+            message += `\n💡 Progression : ${progression}%`;
         }
+        
+        // Affichage de l'historique
+        message += `\n\n📋 *Historique validations (${validationsExistantes.length + 1}):*\n`;
+        const toutesValidations = [...validationsExistantes, {
+            date: new Date().toISOString(),
+            quantite: quantiteConvertie,
+            cout: coutUnitaire,
+            validePar: 'bot_whatsapp'
+        }];
+        
+        toutesValidations.slice(-3).forEach((v, i) => {
+            const date = new Date(v.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+            const source = v.validePar === 'bot_whatsapp' ? '🤖' : '👤';
+            message += `${source} ${date}: ${v.quantite.toFixed(2)} ${uniteFirestore} @ ${v.cout.toFixed(2)}€\n`;
+        });
         
         await chat.sendMessage(message);
         
-        console.log(`✅ Fourniture ajoutée avec succès`);
+        console.log(`✅ Fourniture ajoutée avec succès (index: ${ligneIndex})`);
         
     } catch (error) {
         console.error('❌ Erreur ajout fourniture:', error);
         await chat.sendMessage('❌ Erreur lors de l\'ajout de la fourniture. Réessayez plus tard.');
+    }
+}
+
+async function terminerFourniture(terminer, chat) {
+    try {
+        const { chantier, fourniture, raison } = terminer;
+        
+        console.log(`✅ Marquer terminé: ${fourniture} pour ${chantier}`);
+        
+        // Rechercher la fourniture dans le chantier
+        const fournitureTrouvee = await rechercherFourniture(chantier, fourniture);
+        
+        if (!fournitureTrouvee) {
+            await chat.sendMessage(`❌ Fourniture "${fourniture}" non trouvée dans le chantier "${chantier}".`);
+            return;
+        }
+        
+        // Trouver l'index de la fourniture
+        const fichier = `${chantier.toLowerCase()}.csv`;
+        const ligneIndex = fournitureTrouvee.index;
+        
+        if (ligneIndex === undefined || ligneIndex === null) {
+            await chat.sendMessage(`❌ Impossible de trouver l'index de la fourniture.`);
+            return;
+        }
+        
+        // Marquer comme terminé dans Firestore
+        await marquerTermine(fichier, ligneIndex, fournitureTrouvee);
+        
+        // Message de confirmation
+        let message = `✅ *Fourniture marquée TERMINÉE !*\n\n`;
+        message += `📦 ${fournitureTrouvee.nom}\n`;
+        message += `📍 Chantier : ${chantier.toUpperCase()}\n`;
+        message += `✓ Statut : Complété (quantités suffisantes)\n`;
+        if (raison) {
+            message += `📝 Raison : ${raison}\n`;
+        }
+        message += `\n💡 La ligne est maintenant cochée comme validée à 100%.`;
+        
+        await chat.sendMessage(message);
+        
+        console.log(`✅ Fourniture marquée terminée (index: ${ligneIndex})`);
+        
+    } catch (error) {
+        console.error('❌ Erreur marquer terminé:', error);
+        await chat.sendMessage('❌ Erreur lors du marquage. Réessayez plus tard.');
     }
 }
 
