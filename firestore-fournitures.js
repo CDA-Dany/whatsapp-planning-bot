@@ -13,18 +13,18 @@ const db = admin.firestore();
  */
 export async function rechercherFourniture(chantier, nomFourniture) {
     try {
-        const chantierNorm = normaliserNom(chantier);
         const nomNormalise = normaliserNomFourniture(nomFourniture);
         
-        console.log(`🔍 Recherche "${nomNormalise}" dans chantier "${chantierNorm}"`);
+        // Utiliser le nom du chantier en minuscules (doit correspondre au nom du fichier CSV)
+        const collectionNom = chantier.toLowerCase();
+        
+        console.log(`🔍 Recherche "${nomNormalise}" dans collection "${collectionNom}"`);
         
         // Récupérer toutes les fournitures du chantier
-        const snapshot = await db.collection('fournitures')
-            .where('chantier', '==', chantierNorm)
-            .get();
+        const snapshot = await db.collection(collectionNom).get();
         
         if (snapshot.empty) {
-            console.log(`❌ Aucune fourniture dans le chantier ${chantierNorm}`);
+            console.log(`❌ Aucune fourniture dans le chantier ${chantier}`);
             return null;
         }
         
@@ -45,7 +45,7 @@ export async function rechercherFourniture(chantier, nomFourniture) {
         // Accepter si score >= 0.5
         if (meilleureScore >= 0.5) {
             console.log(`✅ Trouvé: ${meilleurMatch.nom} (score: ${meilleureScore})`);
-            return meilleurMatch;
+            return { ...meilleurMatch, collection: collectionNom };
         }
         
         console.log(`❌ Aucune correspondance (meilleur score: ${meilleureScore})`);
@@ -60,9 +60,9 @@ export async function rechercherFourniture(chantier, nomFourniture) {
 /**
  * Ajouter une quantité à une fourniture
  */
-export async function ajouterQuantiteFourniture(fournitureId, quantite) {
+export async function ajouterQuantiteFourniture(fournitureId, quantite, collectionNom) {
     try {
-        const fournitureRef = db.collection('fournitures').doc(fournitureId);
+        const fournitureRef = db.collection(collectionNom).doc(fournitureId);
         
         // Récupérer fourniture actuelle
         const doc = await fournitureRef.get();
@@ -97,10 +97,6 @@ export async function ajouterQuantiteFourniture(fournitureId, quantite) {
 // ========================
 // FONCTIONS UTILITAIRES
 // ========================
-
-function normaliserNom(nom) {
-    return nom.toLowerCase().replace(/[^a-z0-9]/g, '_');
-}
 
 function normaliserNomFourniture(nom) {
     return nom.toLowerCase()
