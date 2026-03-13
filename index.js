@@ -3,6 +3,7 @@ const { Client, LocalAuth } = pkg;
 import dotenv from 'dotenv';
 import { analyzerMessage } from './claude.js';
 import { sauvegarderTachePlanning, rechercherTaches, supprimerTaches, modifierTaches, detecterConflits, validerTache, detecterConflitPlageHoraire } from './firestore.js';
+import { rechercherFourniture, ajouterQuantiteFourniture } from './firestore-fournitures.js';
 
 dotenv.config();
 
@@ -379,6 +380,18 @@ async function traiterMessage(message, texte, senderName, chat) {
                 break;
                 
             case 'demander_precision':
+                await demanderPrecision(analyse.question, chat);
+                conversationContext.push({ role: 'user', content: texte });
+                conversationContext.push({ role: 'assistant', content: analyse.question });
+                conversationsEnCours.set(conversationId, conversationContext);
+                break;
+                
+            case 'ajouter_fourniture':
+                await ajouterFourniture(analyse.achat, chat);
+                conversationsEnCours.delete(conversationId);
+                break;
+                
+            case 'demander_precision_fourniture':
                 await demanderPrecision(analyse.question, chat);
                 conversationContext.push({ role: 'user', content: texte });
                 conversationContext.push({ role: 'assistant', content: analyse.question });
@@ -914,6 +927,56 @@ async function demanderPrecision(question, chat) {
         console.log('❓ Question posée:', question);
     } catch (error) {
         console.error('❌ Erreur envoi question:', error);
+    }
+}
+
+// ========================
+// GESTION FOURNITURES
+// ========================
+
+async function ajouterFourniture(achat, chat) {
+    try {
+        const { chantier, fourniture, quantite, unite, notes } = achat;
+        
+        console.log(`📦 Ajout fourniture: ${quantite} ${fourniture} pour ${chantier}`);
+        
+        // Rechercher la fourniture dans le chantier
+        const fournitureTrouvee = await rechercherFourniture(chantier, fourniture);
+        
+        if (!fournitureTrouvee) {
+            await chat.sendMessage(`❌ Fourniture "${fourniture}" non trouvée dans le chantier "${chantier}".\n\nVérifie le nom ou ajoute cette fourniture au système.`);
+            return;
+        }
+        
+        // Ajouter la quantité
+        const resultat = await ajouterQuantiteFourniture(fournitureTrouvee.id, quantite);
+        
+        // Calcul progression
+        const progression = Math.round((resultat.quantite_utilisee / resultat.quantite_prevue) * 100);
+        
+        // Message de confirmation
+        let message = `✅ *Fourniture validée !*\n\n`;
+        message += `📦 ${resultat.nom}\n`;
+        message += `📍 Chantier : ${chantier.toUpperCase()}\n`;
+        message += `➕ Quantité ajoutée : ${resultat.quantite_ajoutee} ${fournitureTrouvee.unite}\n`;
+        message += `📊 Total utilisé : ${resultat.quantite_utilisee}/${resultat.quantite_prevue} (${progression}%)\n`;
+        
+        // Alertes
+        if (progression >= 100) {
+            message += `\n⚠️ *ALERTE : Stock dépassé à ${progression}% !*`;
+        } else if (progression >= 90) {
+            message += `\n⚠️ *Attention : ${progression}% du stock utilisé !*`;
+        } else if (progression >= 70) {
+            message += `\n💡 Stock à ${progression}%`;
+        }
+        
+        await chat.sendMessage(message);
+        
+        console.log(`✅ Fourniture ajoutée avec succès`);
+        
+    } catch (error) {
+        console.error('❌ Erreur ajout fourniture:', error);
+        await chat.sendMessage('❌ Erreur lors de l\'ajout de la fourniture. Réessayez plus tard.');
     }
 }
 
