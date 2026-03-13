@@ -7,27 +7,72 @@ const db = admin.firestore();
  * Table de conversion d'unités
  */
 const CONVERSIONS = {
+    // Surfaces - plaques vers m²
+    plaque_osb_vers_m2: 2.88,  // 1 plaque OSB = 2400x1200 = 2.88m²
+    plaque_ba13_vers_m2: 3.00, // 1 plaque BA13 = 2500x1200 = 3m²
+    plaque_standard_vers_m2: 2.88, // Par défaut si type inconnu
+    
     // Longueurs (ml = mètre linéaire)
     m_vers_cm: 100,
     m_vers_mm: 1000,
     cm_vers_mm: 10,
-    ml_vers_m: 1,      // ml (mètre linéaire) = m
+    ml_vers_m: 1,
     ml_vers_cm: 100,
     ml_vers_mm: 1000,
 };
 
 /**
  * Convertir une quantité d'une unité à une autre
+ * Utilisé pour convertir ce que dit l'utilisateur WhatsApp vers l'unité Firestore
  */
 export function convertirUnite(quantite, uniteSource, uniteCible, nomFourniture = '') {
-    const source = uniteSource.toLowerCase();
-    const cible = uniteCible.toLowerCase();
+    const source = uniteSource.toLowerCase().trim();
+    const cible = uniteCible.toLowerCase().trim();
+    const nom = nomFourniture.toLowerCase();
     
     if (source === cible) {
         return quantite;
     }
     
-    // Longueurs (m, ml, cm, mm)
+    // ==========================================
+    // CONVERSIONS PLAQUES → m²
+    // ==========================================
+    if ((source === 'plaque' || source === 'plaques') && (cible === 'm²' || cible === 'm2')) {
+        // Déterminer le type de plaque
+        if (nom.includes('osb')) {
+            return quantite * CONVERSIONS.plaque_osb_vers_m2;
+        } else if (nom.includes('ba13') || nom.includes('placo')) {
+            return quantite * CONVERSIONS.plaque_ba13_vers_m2;
+        } else {
+            // Type inconnu, utiliser standard OSB
+            return quantite * CONVERSIONS.plaque_standard_vers_m2;
+        }
+    }
+    
+    // m² → plaques (inverse)
+    if ((source === 'm²' || source === 'm2') && (cible === 'plaque' || cible === 'plaques')) {
+        if (nom.includes('osb')) {
+            return quantite / CONVERSIONS.plaque_osb_vers_m2;
+        } else if (nom.includes('ba13') || nom.includes('placo')) {
+            return quantite / CONVERSIONS.plaque_ba13_vers_m2;
+        } else {
+            return quantite / CONVERSIONS.plaque_standard_vers_m2;
+        }
+    }
+    
+    // ==========================================
+    // CONVERSIONS VIS/PIÈCES → U (Unité)
+    // ==========================================
+    if ((source === 'vis' || source === 'piece' || source === 'pièce' || source === 'pièces' || source === 'pieces') && cible === 'u') {
+        return quantite; // 1 vis = 1 U
+    }
+    if (source === 'u' && (cible === 'vis' || cible === 'piece' || cible === 'pièce')) {
+        return quantite;
+    }
+    
+    // ==========================================
+    // CONVERSIONS LONGUEURS (m, ml, cm, mm)
+    // ==========================================
     if (source === 'm' && cible === 'cm') return quantite * CONVERSIONS.m_vers_cm;
     if (source === 'm' && cible === 'mm') return quantite * CONVERSIONS.m_vers_mm;
     if (source === 'cm' && cible === 'mm') return quantite * CONVERSIONS.cm_vers_mm;
@@ -43,11 +88,17 @@ export function convertirUnite(quantite, uniteSource, uniteCible, nomFourniture 
     if (source === 'ml' && cible === 'mm') return quantite * CONVERSIONS.ml_vers_mm;
     if (source === 'mm' && cible === 'ml') return quantite / CONVERSIONS.ml_vers_mm;
     
-    // Unités identiques conceptuellement
-    if ((source === 'u' || source === 'unite' || source === 'unité') && (cible === 'u' || cible === 'unite' || cible === 'unité')) return quantite;
-    if ((source === 'piece' || source === 'pièce') && (cible === 'u' || cible === 'unite' || cible === 'unité')) return quantite;
-    if ((source === 'u' || source === 'unite' || source === 'unité') && (cible === 'piece' || cible === 'pièce')) return quantite;
-    if ((source === 'piece' || source === 'pièce') && (cible === 'piece' || cible === 'pièce')) return quantite;
+    // Variantes "mètre" / "metre" → m ou ml
+    if ((source === 'mètre' || source === 'metre' || source === 'mètres' || source === 'metres') && cible === 'm') return quantite;
+    if ((source === 'mètre' || source === 'metre' || source === 'mètres' || source === 'metres') && cible === 'ml') return quantite;
+    if (source === 'm' && (cible === 'mètre' || cible === 'metre')) return quantite;
+    if (source === 'ml' && (cible === 'mètre' || cible === 'metre')) return quantite;
+    
+    // ==========================================
+    // CONVERSIONS JOURS
+    // ==========================================
+    if ((source === 'jour' || source === 'jours' || source === 'j') && cible === 'j') return quantite;
+    if (source === 'j' && (cible === 'jour' || cible === 'jours')) return quantite;
     
     // Pas de conversion possible
     return null;
